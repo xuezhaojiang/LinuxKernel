@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+
+<head lang="en">
+    <meta charset="utf-8">
+    <title>linux core lab2</title>
+    <!-- <link rel="stylesheet" href="css/normalize.css" type="text/css"> -->
+    <link rel="stylesheet" href="css/main.css" type="text/css">
+    <link type="text/css" rel="stylesheet" href="css/shCore.css" />
+    <link type="text/css" rel="stylesheet" href="css/shCoreDefault.css" />
+    <script type="text/javascript" src="js/shCore.js"></script>
+    <script type="text/javascript" src="js/shBrushCpp.js"></script>
+    <link href="https://cdn.bootcss.com/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet">
+    <script type="text/javascript">
+    SyntaxHighlighter.all();
+    </script>
+</head>
+
+<body>
+    <header>
+        <title>完成一个简单的时间片轮转多道程序内核代码</title>
+        <h1>完成一个简单的时间片轮转多道程序内核代码</h1>
+        <p>薛兆江 + 原创作品转载请注明出处 + <a href="http://mooc.study.163.com/course/USTC-1000029000">《Linux内核分析》MOOC课程</a>http://mooc.study.163.com/course/USTC-1000029000</p>
+    </header>
+    <content>
+        <section id="target">
+            <h2>学习目标</h2>
+            <p>完成一个简单的时间片轮转多道程序内核代码,理解操作系统是如何工作的</p>
+        </section>
+        <section id="abc">
+            <h2>基础知识</h2>
+            <div id="函数调用">
+                <h3>函数调用</h3>
+                <table border="1" cellspacing="0">
+                    <tr>
+                        <th>函数调用约定</th>
+                        <th>参数传递顺序</th>
+                        <th>负责清理参数占用的堆栈</th>
+                    </tr>
+                    <tr>
+                        <td>__pascal</td>
+                        <td>从左到右</td>
+                        <td>调用者</td>
+                    </tr>
+                    <tr>
+                        <td>__stdcall</td>
+                        <td>从右到左</td>
+                        <td>被调函数</td>
+                    </tr>
+                    <tr>
+                        <td>__cdecl</td>
+                        <td>从右到左</td>
+                        <td>调用者</td>
+                    </tr>
+                </table>
+                <p>linux中gcc默认用的规则是__stdcall.
+                </p>
+                <p>Windows中C/C++程序的缺省函数调用约定是__cdecl.
+                </p>
+                <p>调用函数时c语言会利用堆栈来做一个函数调用框架。如下图所示</p>
+                <img src="img/函数调用.jpg">
+            </div>
+            <div id="C代码中嵌入汇编代码">
+                <h3>C代码中嵌入汇编代码</h3>
+                <p>内嵌汇编语法：__asm__(汇编语句模板: 输出部分: 输入部分: 破坏描述部分)。指令中的操作数可以使用占位符引用C语言变量，名称如下：%0，%1，…，%9。</p>
+                <p>输入部分描述输入操作数，不同的操作数描述符之间使用逗号格开，每个操作数描述符由限定字符串和C语言表达式或者C语言变量组成。</p>
+                <p>输出部分描述输出操作数，不同的操作数描述符之间用逗号格开，每个操作数描述符由限定字符串和C语言变量组成。 每个输出操作数的限定字符串必须包含“=”表示他是一个输出操作数。 </p>
+                <p>限制字符有很多种，有些是与特定体系结构相关，它们的作用是指示编译器如何处理其后的C语言变量与指令操作数之间的关系。</p>
+                <table border="1" cellspacing="0">
+                    <tr>
+                        <th colspan='3'>常用限制字符</th>
+                    </tr>
+                    <tr>
+                        <th>分类</th>
+                        <th>限定符</th>
+                        <th>描述</th>
+                    </tr>
+                    <tr>
+                        <td rowspan='9'>通用寄存器</td>
+                        <td>“a”</td>
+                        <td>将输入变量放入eax</td>
+                    </tr>
+                    <td>“b”</td>
+                    <td>将输入变量放入ebx</td>
+                    </tr>
+                    <tr>
+                        <td>“c”</td>
+                        <td>将输入变量放入ecx</td>
+                    </tr>
+                    <tr>
+                        <td>“d”</td>
+                        <td>将输入变量放入edx</td>
+                    </tr>
+                    <tr>
+                        <td>“s”</td>
+                        <td>将输入变量放入esi </td>
+                    </tr>
+                    <tr>
+                        <td>“d”</td>
+                        <td>将输入变量放入edi</td>
+                    </tr>
+                    <tr>
+                        <td>“q”</td>
+                        <td>将输入变量放入eax，ebx，ecx，edx中的一个</td>
+                    </tr>
+                    <tr>
+                        <td>“r”</td>
+                        <td>将输入变量放入通用寄存器，也就是eax，ebx，ecx，edx，esi，edi中的一个</td>
+                        <tr>
+                            <td> “A”</td>
+                            <td>把eax和edx合成一个64 位的寄存器(use long longs)</td>
+                        </tr>
+                        <tr>
+                            <td rowspan='5'>内存</td>
+                            <td>“m”</td>
+                            <td>内存变量</td>
+                        </tr>
+                        <tr>
+                            <td>“o”</td>
+                            <td> 操作数为内存变量，但是其寻址方式是偏移量类型，也即是基址寻址，或者是基址加变址寻址 </td>
+                        </tr>
+                        <tr>
+                            <td>“V”</td>
+                            <td>操作数为内存变量，但寻址方式不是偏移量类型</td>
+                        </tr>
+                        <tr>
+                            <td>“ ”</td>
+                            <td>操作数为内存变量，但寻址方式为自动增量</td>
+                        </tr>
+                        <tr>
+                            <td>“p”</td>
+                            <td>操作数是一个合法的内存地址（指针）</td>
+                        </tr>
+                        <tr>
+                            <td rowspan='2'>寄存器或内存</td>
+                            <td>“g”</td>
+                            <td>将输入变量放入eax，ebx，ecx，edx中的一个或者作为内存变量</td>
+                        </tr>
+                        <tr>
+                            <td>“X”</td>
+                            <td>操作数可以是任何类型</td>
+                        </tr>
+                        <tr>
+                            <td rowspan='5'>立即数</td>
+                            <td>“I”</td>
+                            <td>0-31之间的立即数（用于32位移位指令）</td>
+                        </tr>
+                        <tr>
+                            <td>“J”</td>
+                            <td>0-63之间的立即数（用于64位移位指令）</td>
+                        </tr>
+                        <tr>
+                            <td>“N”</td>
+                            <td>0-255之间的立即数（用于out指令）</td>
+                        </tr>
+                        <tr>
+                            <td>“n”</td>
+                            <td>立即数</td>
+                        </tr>
+                        <tr>
+                            <td>“p”</td>
+                            <td> 立即数，有些系统不支持除字以外的立即数，这些系统应该使用“n”而不是“i”</td>
+                        </tr>
+                        <tr>
+                            <td>匹配</td>
+                            <td>&</td>
+                            <td>该输出操作数不能使用过和输入操作数相同的寄存器</td>
+                        </tr>
+                        <tr>
+                            <td rowspan='2'>操作数类型</td>
+                            <td>“=”</td>
+                            <td>操作数在指令中是只写的（输出操作数）</td>
+                        </tr>
+                        <tr>
+                            <td>“+”</td>
+                            <td>操作数在指令中是读写类型的（输入输出操作数）</td>
+                        </tr>
+                        <tr>
+                            <td rowspan='4'>浮点数</td>
+                            <td>“f”</td>
+                            <td>浮点寄存器</td>
+                        </tr>
+                        <tr>
+                            <td>“t”</td>
+                            <td>第一个浮点寄存器</td>
+                        </tr>
+                        <tr>
+                            <td>“u”</td>
+                            <td>第二个浮点寄存器</td>
+                        </tr>
+                        <tr>
+                            <td>“G”</td>
+                            <td>标准的80387浮点常数</td>
+                        </tr>
+                        <tr>
+                            <td rowspan='3'>其它</td>
+                            <td>%</td>
+                            <td>该操作数可以和下一个操作数交换位置</td>
+                        </tr>
+                        <tr>
+                            <td>#</td>
+                            <td> 部分注释，从该字符到其后的逗号之间所有字母被忽略</td>
+                        </tr>
+                        <tr>
+                            <td>*</td>
+                            <td>表示如果选用寄存器，则其后的字母被忽略</td>
+                        </tr>
+                </table>
+                <p>C代码中嵌入汇编代码举例</p>
+                <img src="img/asm.jpg" alt="C代码中嵌入汇编代码举例">
+            </div>
+        </section>
+        <section id="experiment">
+            <h2>实验部分</h2>
+            <div id="实验步骤">
+                <h3>实验步骤</h3>
+                <ul>
+                    <li>1.按照实验楼中的步骤，查看修改代码前的运行结果
+                        <p>
+                            cd LinuxKernel/linux-3.9.4
+                        </p>
+                        <p> rm -rf mykernel
+                        </p>
+                        <p> patch -p1 &#60 ../mykernel_for_linux3.9.4sc.patch
+                        </p>
+                        <p> make allnoconfig
+                        </p>
+                        <p> make ＃编译内核请耐心等待
+                        </p>
+                        <p> qemu -kernel arch/x86/boot/bzImage
+                        </p>
+                    </li>
+                    <h4>代码修改前的运行结果</h4>
+                    <img src="img/run1.jpg" alt="代码修改前的运行结果">
+                    <br>
+                    <li>2.覆盖mykernel文件
+                        <p>进入实验楼,mykernel文件夹,从github中copy文件，覆盖原来的mymain.c myinterrupt.c 新建mypcb.h。
+                        </p>
+                    </li>
+                    <li>3.重新编译内核源码
+                        <p>cd ~/LinuxKernel/linux-3.9.4/
+                        </p>
+                        <p>make</p>
+                    </li>
+                    <li>4.使用QEMU运行内核编译后的内核
+                        <p>cd ~/LinuxKernel/linux-3.9.4/
+                        </p>
+                        <p>qemu -kernel arch/x86/boot/bzImage</p>
+                    </li>
+                    <h4>代码修改后的运行结果</h4>
+                    <img src="img/run2.jpg" alt="代码修改后的运行结果">
+                    <img src="img/run3.jpg" alt="代码修改后的运行结果">
+                </ul>
+            </div>
+            <div class="">
+                <h3>代码分析</h3>
+                <div class="code">
+                    <!--Ctrl+Shift+{折叠选中代码段-->
+                    <h4>修改前的mymain.c</h4>
+                    <pre class="brush:cpp">
+                    	void __init my_start_kernel(void)
+						{
+						    int i = 0;
+						    while(1)
+						    {
+						        i++;
+						        if(i%100000 == 0)
+						            printk(KERN_NOTICE "my_start_kernel here  %d \n",i);
+						            
+						    }
+						}
+                    </pre>
+                    <h4>修改前的myinterrupt.c</h4>
+                    <pre class="brush:cpp">
+						void my_timer_handler(void)
+						{
+							printk(KERN_NOTICE "\n>>>>>>>>>>>>>>>>>my_timer_handler here<<<<<<<<<<<<<<<<<<\n\n");
+						}
+                    </pre>
+                    <p>mymain.c中是一个循环，每次i是100000的倍数时，进行输出。myinterrupt.c中时一个被时钟中断周期调用的函数，进行输出。</p>
+                    <h4>mypcb.h</h4>
+                    <pre class="brush:cpp">
+                    
+                            #define MAX_TASK_NUM 10 // max num of task in system
+                            #define KERNEL_STACK_SIZE 1024*8
+                            #define PRIORITY_MAX 30 //priority range from 0 to 30
+
+                            /* CPU-specific state of this task */
+                            struct Thread {
+                                unsigned long   ip;//point to cpu run address
+                                unsigned long   sp;//point to the thread stack's top address
+                                //todo add other attrubte of system thread
+                            };
+                            //PCB Struct
+                            typedef struct PCB{
+                                int pid; // pcb id 
+                                volatile long state;    /* -1 unrunnable, 0 runnable, >0 stopped */
+                                char stack[KERNEL_STACK_SIZE];// each pcb stack size is 1024*8
+                                /* CPU-specific state of this task */
+                                struct Thread thread;
+                                unsigned long   task_entry;//the task execute entry memory address
+                                struct PCB *next;//pcb is a circular linked list
+                                unsigned long priority;// task priority ////////
+                                //todo add other attrubte of process control block
+                            }tPCB;
+
+                            void my_schedule(void);
+                    </pre>
+                    <p>在这个头文件中，定义了最大进程数量为10，栈的大小为8K，进程优先级的范围为0~30.
+                    </p>
+                    <p> 对线程的程序定义了指令指针ip和栈顶指针sp。
+                    </p>
+                    <p> 定义进程控制块，有进程号pid，进程状态state，进程堆栈，进程执行入口，指向下一个进程控制块的指针，进程的优先级。
+                    </p>
+                    <h4>mymain.c</h4>
+                    <pre class="brush:cpp">
+                            #include "mypcb.h"
+                            tPCB task[MAX_TASK_NUM];//进程组，10个
+                            tPCB * my_current_task = NULL;
+                            volatile int my_need_sched = 0;//是否需要调度，1表示需要
+
+                            void my_process(void);
+                            unsigned long get_rand(int );
+							
+							//为每个进程设置优先级
+                            void sand_priority(void)
+                            {
+                                int i;
+                                for(i=0;i&#60MAX_TASK_NUM;i++)
+                                    task[i].priority=get_rand(PRIORITY_MAX);
+                            }
+
+                            void __init my_start_kernel(void)
+                            {
+                                int pid = 0;
+
+                                /* Initialize process 0   
+                                *初始化0号进程
+                                */
+                                task[pid].pid = pid;
+                                task[pid].state = 0;/* -1 unrunnable, 0 runnable, >0 stopped */
+                                // set task 0 execute entry address to my_process
+                                //设置0号进程的执行入口为函数my_process的起始地址。函数名是在编程时候代指函数入口地址的符号，编译时函数名会被对应的函数入口地址
+                                task[pid].task_entry = task[pid].thread.ip = (unsigned long)my_process;
+                                //栈顶指针指向堆栈的高地址，函数执行过程中，栈顶指针由高地址向低地址走
+                                task[pid].thread.sp = (unsigned long)&task[pid].stack[KERNEL_STACK_SIZE-1];
+                                //next pid指向0号进程自身，组成一个单向循环链表
+                                task[pid].next = &task[pid];
+
+                                /*fork more process 
+								*设置1~9号进程，每个进程要做的任务都是my_process()
+                                */
+                                for(pid=1;pid&#60MAX_TASK_NUM;pid++)
+                                {
+                                    memcpy(&task[pid],&task[0],sizeof(tPCB));
+                                    task[pid].pid = pid;
+                                    task[pid].state = -1;
+                                    task[pid].thread.sp = (unsigned long)&task[pid].stack[KERNEL_STACK_SIZE-1];
+                                    task[pid].priority=get_rand(PRIORITY_MAX);//each time all tasks get a random priority
+                                }
+                                task[MAX_TASK_NUM-1].next=&task[0];
+                                printk(KERN_NOTICE "\n\n\n\n\n\n  system begin :>>>process 0 running!!!&#60&#60&#60\n\n");
+                                /* start process 0 by task[0] */
+                                pid = 0;
+                                my_current_task = &task[pid];
+							
+								//修改栈顶指针esp，指令指针eip，启动0号进程，修改栈底指针ebp
+	                            asm volatile(
+	                                 "movl %1,%%esp\n\t" /* set task[pid].thread.sp to esp */
+	                                 "pushl %1\n\t" /* push ebp */
+	                                 "pushl %0\n\t" /* push task[pid].thread.ip */
+	                                 "ret\n\t" /* pop task[pid].thread.ip to eip */
+	                                 "popl %%ebp\n\t"
+	                                 :
+	                                 : "c" (task[pid].thread.ip),"d" (task[pid].thread.sp)  /* input c or d mean %ecx/%edx*/
+	                            );
+                            }
+							
+                            void my_process(void)
+                            {
+                                int i = 0;
+                                while(1)
+                                {
+                                    i++;
+                                    if(i%10000000 == 0)
+                                    {
+                                        if(my_need_sched == 1)//如果需要调度
+                                        {
+                                            my_need_sched = 0;
+                                            sand_priority();//修改每个进程的优先级
+                                            my_schedule();//进行调度
+                                    
+                                        }
+                                    }
+                                }
+                            }
+
+                            //produce a random priority to a task
+                            unsigned long get_rand(max)
+                            {
+                                unsigned long a;
+                                unsigned long umax;
+                                umax=(unsigned long)max;
+                                get_random_bytes(&a, sizeof(unsigned long ));
+                                a=(a+umax)%umax;
+                                return a;
+                            }
+                    </pre>
+                    <h4>myinterrupt.c</h4>
+                    <pre class="brush:cpp">
+                            #include "mypcb.h"
+
+                            #define CREATE_TRACE_POINTS
+                            #include &#60trace/events/timer.h>
+
+                            extern tPCB task[MAX_TASK_NUM];
+                            extern tPCB * my_current_task;
+                            extern volatile int my_need_sched;
+                            volatile int time_count = 0;
+
+                            /*
+                            * Called by timer interrupt.
+                            * it runs in the name of current running process,
+                            * so it use kernel stack of current running process
+                            */
+                            void my_timer_handler(void)
+                            {
+                            #if 1
+                                // make sure need schedule after system circle 2000 times.
+                                //time_count每自增2000，进行调度
+                                if(time_count%2000 == 0 && my_need_sched != 1)
+                                {
+                                    my_need_sched = 1;
+                                }
+                                time_count ++ ;
+                            #endif
+                                return;
+                            }
+
+                            void all_task_print(void);//输出当前进程，以及进程组的信息
+
+                            //按照优先级获得下一个需要执行的进程
+                            tPCB * get_next(void)
+                            {
+                                int pid,i;
+                                tPCB * point=NULL;
+                                tPCB * hig_pri=NULL;//points to the the hightest task
+                                all_task_print();
+                                hig_pri=my_current_task;
+                                for(i=0;i&#60MAX_TASK_NUM;i++)
+                                    if(task[i].priority&#60hig_pri->priority)  
+                                        hig_pri=&task[i];
+                                printk("higst process is:%d priority is:%d\n",hig_pri->pid,hig_pri->priority);
+                                return hig_pri;
+
+                            }//end of priority_schedule
+
+                            void my_schedule(void)
+                            {
+                                tPCB * next;//下个进程
+                                tPCB * prev;//当前进程
+                                // if there no task running or only a task ,it shouldn't need schedule
+                                if(my_current_task == NULL
+                                    || my_current_task->next == NULL)
+                                {
+                                    printk(KERN_NOTICE "time out!!!,but no more than 2 task,need not schedule\n");
+                                    return;
+                                }
+                                /* schedule */
+
+                                next = get_next();
+                                prev = my_current_task;
+                                printk(KERN_NOTICE "the next task is %d priority is %u\n",next->pid,next->priority);
+
+                                if(next->state == 0)/* -1 unrunnable, 0 runnable, >0 stopped */
+	                            {	//save current scene
+	                                //保存当前场景，切换到下一个进程
+	                                /* switch to next process */
+	                                asm volatile(  
+	                                    "pushl %%ebp\n\t" /* save ebp */
+	                                    "movl %%esp,%0\n\t" /* save esp */
+	                                    "movl %2,%%esp\n\t" /* restore esp */
+	                                    "movl $1f,%1\n\t" /* save eip */ //$1f是接下来的标号“1：”的位置也就是第76行，就是在调度执行下一个进程之前，把eip保存下来，便于恢复进程  
+	                                    "pushl %3\n\t"
+	                                    "ret\n\t" /* restore eip */
+	                                    "1:\t" /* next process start here */
+	                                    "popl %%ebp\n\t"
+	                                    : "=m" (prev->thread.sp),"=m" (prev->thread.ip)
+	                                    : "m" (next->thread.sp),"m" (next->thread.ip)
+	                                );
+                                    my_current_task = next;//switch to the next task
+                                    printk(KERN_NOTICE "switch from %d process to %d process\n >>>process %d running!!!&#60&#60&#60\n\n",prev->pid,next->pid,next->pid);
+
+                                }
+                                else//next->state != 0  进程未运行过
+                                {
+                                    next->state = 0;
+                                    my_current_task = next;
+                                    printk(KERN_NOTICE "switch from %d process to %d process\n  >>>process %d running!!!&#60&#60&#60\n\n\n",prev->pid,next->pid,next->pid);
+
+	                                 /* switch to new process */
+	                                 asm volatile(  
+	                                     "pushl %%ebp\n\t" /* save ebp */
+	                                     "movl %%esp,%0\n\t" /* save esp */
+	                                     "movl %2,%%esp\n\t" /* restore esp */
+	                                     "movl %2,%%ebp\n\t" /* restore ebp */
+	                                     "movl $1f,%1\n\t" /* save eip *///这句好像没用   
+	                                     "pushl %3\n\t"
+	                                     "ret\n\t" /* restore eip */
+	                                     : "=m" (prev->thread.sp),"=m" (prev->thread.ip)
+	                                     : "m" (next->thread.sp),"m" (next->thread.ip)
+	                                 );
+                                }
+                                return; 
+                            }//end of my_schedule
+
+                            void all_task_print(void)//输出当前进程，以及进程组的信息
+                            {
+                                int i,cnum=62;//
+                                printk(KERN_NOTICE "\n current task is:%d   all task in OS are:\n",my_current_task->pid);
+
+                                printk("        ");
+                                for(i=0;i&#60cnum;i++)
+                                    printk("-");
+                                printk("\n | process:");
+                                for(i=0;i&#60 MAX_TASK_NUM;i++)
+                                    printk("| %2d ",i);
+                                printk("|\n | priority:");
+                                for(i=0;i&#60MAX_TASK_NUM;i++)
+                                    printk("| %2d ",task[i].priority);
+
+                                printk("| \n");
+                                for(i=0;i&#60cnum;i++)
+                                    printk("-");
+                                printk("\n");
+                            }
+                    </pre>
+                    <p>代码有点多，总结一下，执行过程。my_time_handler()函数，是个时间片轮转，周期性地发出中断信号，也就是my_need_sched。my_start_kernel()完成每个进程初始化，每个进程的任务都是my_process(),由于这个函数中有个无限循环，任务永远不会结束。任务需要调度时根据任务的优先级进行调度。</p>
+                </div>
+            </div>
+        </section>
+        <section id="reference">
+            <h2>参考资料</h2>
+            <p>
+                <a href="http://blog.csdn.net/u010634758/article/details/50810986">Linux内核分析 实验二：完成一个简单的时间片轮转多道程序内核代码</a>
+            </p>
+            <p>
+                <a href="http://blog.csdn.net/u010634758/article/details/50810986"> Linux内核分析 实验二：完成一个简单的时间片轮转多道程序内核代码</a>
+            </p>
+            <p>
+                <a href="http://www.cnblogs.com/hyq20135317/p/5243754.html">LINUX内核分析第二周学习总结：操作系统是如何工作的？</a>
+            </p>
+            <p>
+                <a href="http://micili.cn/category/2015-03-13">一个简单的时间片轮转多道程序Linux内核代码分析</a>
+            </p>
+            <p>
+                <a href="http://blog.csdn.net/ontheroad530/article/details/50446075">内嵌汇编 %0，%1 是什么</a>
+            </p>
+        </section>
+    </content>
+    <footer>
+        <ul class="share-group">
+            <li><i class="fa fa-weixin fa-2x"></i>微信
+                <br>xue-zhaojiang</li>
+            <li><i class="fa fa-qq fa-2x"></i>QQ
+                <br>602431866</li>
+            <li><i class="fa fa-weibo fa-2x"></i>新浪微博
+                <br>小皇叔666</li>
+            <li><i class="fa fa-github fa-2x"></i>GitHub
+                <br>xuezhaojiang</li>
+        </ul>
+    </footer>
+</body>
