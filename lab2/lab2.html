@@ -248,7 +248,6 @@
                     </li>
                     <h4>代码修改后的运行结果</h4>
                     <img src="img/run2.jpg" alt="代码修改后的运行结果">
-                    <img src="img/run3.jpg" alt="代码修改后的运行结果">
                 </ul>
             </div>
             <div class="">
@@ -279,262 +278,222 @@
                     <p>mymain.c中是一个循环，每次i是100000的倍数时，进行输出。myinterrupt.c中时一个被时钟中断周期调用的函数，进行输出。</p>
                     <h4>mypcb.h</h4>
                     <pre class="brush:cpp">
-                    
-                            #define MAX_TASK_NUM 10 // max num of task in system
-                            #define KERNEL_STACK_SIZE 1024*8
-                            #define PRIORITY_MAX 30 //priority range from 0 to 30
+	                    /*
+						 *  linux/mykernel/mypcb.h
+						 *
+						 *  Kernel internal PCB types
+						 *
+						 *  Copyright (C) 2013  Mengning
+						 *
+						 */
 
-                            /* CPU-specific state of this task */
-                            struct Thread {
-                                unsigned long   ip;//point to cpu run address
-                                unsigned long   sp;//point to the thread stack's top address
-                                //todo add other attrubte of system thread
-                            };
-                            //PCB Struct
-                            typedef struct PCB{
-                                int pid; // pcb id 
-                                volatile long state;    /* -1 unrunnable, 0 runnable, >0 stopped */
-                                char stack[KERNEL_STACK_SIZE];// each pcb stack size is 1024*8
-                                /* CPU-specific state of this task */
-                                struct Thread thread;
-                                unsigned long   task_entry;//the task execute entry memory address
-                                struct PCB *next;//pcb is a circular linked list
-                                unsigned long priority;// task priority ////////
-                                //todo add other attrubte of process control block
-                            }tPCB;
+						#define MAX_TASK_NUM        4
+						#define KERNEL_STACK_SIZE   1024*8
 
-                            void my_schedule(void);
+						/* CPU-specific state of this task */
+						struct Thread {
+						    unsigned long		ip;
+						    unsigned long		sp;
+						};
+
+						typedef struct PCB{
+						    int pid;
+						    volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
+						    char stack[KERNEL_STACK_SIZE];
+						    /* CPU-specific state of this task */
+						    struct Thread thread;
+						    unsigned long	task_entry;
+						    struct PCB *next;
+						}tPCB;
                     </pre>
-                    <p>在这个头文件中，定义了最大进程数量为10，栈的大小为8K，进程优先级的范围为0~30.
+                    <p>在这个头文件中，定义了最大进程数量为4，栈的大小为8K.
                     </p>
                     <p> 对线程的程序定义了指令指针ip和栈顶指针sp。
                     </p>
-                    <p> 定义进程控制块，有进程号pid，进程状态state，进程堆栈，进程执行入口，指向下一个进程控制块的指针，进程的优先级。
+                    <p> 定义进程控制块，有进程号pid，进程状态state，进程堆栈，进程执行入口，指向下一个进程控制块的指针。
                     </p>
                     <h4>mymain.c</h4>
                     <pre class="brush:cpp">
-                            #include "mypcb.h"
-                            tPCB task[MAX_TASK_NUM];//进程组，10个
-                            tPCB * my_current_task = NULL;
-                            volatile int my_need_sched = 0;//是否需要调度，1表示需要
+                        /*
+						*  linux/mykernel/mymain.c
+						*
+						*  Kernel internal my_start_kernel
+						*
+						*  Copyright (C) 2013  Mengning
+						*
+						*/
+						#include &#60 linux/types.h&#62 
+						#include &#60 linux/string.h&#62 
+						#include &#60 linux/ctype.h&#62 
+						#include &#60 linux/tty.h&#62 
+						#include &#60 linux/vmalloc.h&#62 
 
-                            void my_process(void);
-                            unsigned long get_rand(int );
-							
-							//为每个进程设置优先级
-                            void sand_priority(void)
-                            {
-                                int i;
-                                for(i=0;i&#60MAX_TASK_NUM;i++)
-                                    task[i].priority=get_rand(PRIORITY_MAX);
-                            }
 
-                            void __init my_start_kernel(void)
-                            {
-                                int pid = 0;
+						#include "mypcb.h"
 
-                                /* Initialize process 0   
-                                *初始化0号进程
-                                */
-                                task[pid].pid = pid;
-                                task[pid].state = 0;/* -1 unrunnable, 0 runnable, >0 stopped */
-                                // set task 0 execute entry address to my_process
-                                //设置0号进程的执行入口为函数my_process的起始地址。函数名是在编程时候代指函数入口地址的符号，编译时函数名会被对应的函数入口地址
-                                task[pid].task_entry = task[pid].thread.ip = (unsigned long)my_process;
-                                //栈顶指针指向堆栈的高地址，函数执行过程中，栈顶指针由高地址向低地址走
-                                task[pid].thread.sp = (unsigned long)&task[pid].stack[KERNEL_STACK_SIZE-1];
-                                //next pid指向0号进程自身，组成一个单向循环链表
-                                task[pid].next = &task[pid];
+						tPCB task[MAX_TASK_NUM];//进程组4个
+						tPCB * my_current_task = NULL;
+						volatile int my_need_sched = 0;//是否需要调度，1表示需要
 
-                                /*fork more process 
-								*设置1~9号进程，每个进程要做的任务都是my_process()
-                                */
-                                for(pid=1;pid&#60MAX_TASK_NUM;pid++)
-                                {
-                                    memcpy(&task[pid],&task[0],sizeof(tPCB));
-                                    task[pid].pid = pid;
-                                    task[pid].state = -1;
-                                    task[pid].thread.sp = (unsigned long)&task[pid].stack[KERNEL_STACK_SIZE-1];
-                                    task[pid].priority=get_rand(PRIORITY_MAX);//each time all tasks get a random priority
-                                }
-                                task[MAX_TASK_NUM-1].next=&task[0];
-                                printk(KERN_NOTICE "\n\n\n\n\n\n  system begin :>>>process 0 running!!!&#60&#60&#60\n\n");
-                                /* start process 0 by task[0] */
-                                pid = 0;
-                                my_current_task = &task[pid];
-							
-								//修改栈顶指针esp，指令指针eip，启动0号进程，修改栈底指针ebp
-	                            asm volatile(
-	                                 "movl %1,%%esp\n\t" /* set task[pid].thread.sp to esp */
-	                                 "pushl %1\n\t" /* push ebp */
-	                                 "pushl %0\n\t" /* push task[pid].thread.ip */
-	                                 "ret\n\t" /* pop task[pid].thread.ip to eip */
-	                                 "popl %%ebp\n\t"
-	                                 :
-	                                 : "c" (task[pid].thread.ip),"d" (task[pid].thread.sp)  /* input c or d mean %ecx/%edx*/
-	                            );
-                            }
-							
-                            void my_process(void)
-                            {
-                                int i = 0;
-                                while(1)
-                                {
-                                    i++;
-                                    if(i%10000000 == 0)
-                                    {
-                                        if(my_need_sched == 1)//如果需要调度
-                                        {
-                                            my_need_sched = 0;
-                                            sand_priority();//修改每个进程的优先级
-                                            my_schedule();//进行调度
-                                    
-                                        }
-                                    }
-                                }
-                            }
+						void my_process(void);
 
-                            //produce a random priority to a task
-                            unsigned long get_rand(max)
-                            {
-                                unsigned long a;
-                                unsigned long umax;
-                                umax=(unsigned long)max;
-                                get_random_bytes(&a, sizeof(unsigned long ));
-                                a=(a+umax)%umax;
-                                return a;
-                            }
+
+						void __init my_start_kernel(void)
+						{
+						    int pid = 0;
+						    int i;
+						    /* Initialize process 0*/
+						    task[pid].pid = pid;
+						    task[pid].state = 0;/* -1 unrunnable, 0 runnable, >0 stopped */
+						    //设置0号进程的执行入口为函数my_process的起始地址。
+						    task[pid].task_entry = task[pid].thread.ip = (unsigned long)my_process;
+						    //栈顶指针指向堆栈的高地址，函数执行过程中，栈顶指针由高地址向低地址走
+						    task[pid].thread.sp = (unsigned long)&task[pid].stack[KERNEL_STACK_SIZE-1];
+						    //next pid指向0号进程自身，组成一个单向循环链表
+						    task[pid].next = &task[pid];
+						    /*fork more process 
+							*设置1~3号进程，每个进程要做的任务都是my_process()
+						    */
+						    for(i=1;i&#60 MAX_TASK_NUM;i++)
+						    {
+						        memcpy(&task[i],&task[0],sizeof(tPCB));
+						        task[i].pid = i;
+						        task[i].state = -1;
+						        task[i].thread.sp = (unsigned long)&task[i].stack[KERNEL_STACK_SIZE-1];
+						        //组成单向循环链表，为了时间片轮转
+						        task[i].next = task[i-1].next;
+						        task[i-1].next = &task[i];
+						    }
+						    /* start process 0 by task[0] */
+						    pid = 0;
+						    my_current_task = &task[pid];
+						    //修改栈顶指针esp，指令指针eip，启动0号进程，修改栈底指针ebp
+							asm volatile(
+						    	"movl %1,%%esp\n\t" 	/* set task[pid].thread.sp to esp */
+						    	"pushl %1\n\t" 	        /* push ebp */
+						    	"pushl %0\n\t" 	        /* push task[pid].thread.ip */
+						    	"ret\n\t" 	            /* pop task[pid].thread.ip to eip */
+						    	"popl %%ebp\n\t"
+						    	: 
+						    	: "c" (task[pid].thread.ip),"d" (task[pid].thread.sp)	/* input c or d mean %ecx/%edx*/
+							);
+						}   
+						void my_process(void)
+						{
+						    int i = 0;
+						    while(1)
+						    {
+						        i++;
+						        if(i%10000000 == 0)
+						        {
+						            printk(KERN_NOTICE "this is process %d -\n",my_current_task->pid);
+						            if(my_need_sched == 1)//如果需要调度
+						            {
+						                my_need_sched = 0;
+						        	    my_schedule();//进行调度
+						        	}
+						        	printk(KERN_NOTICE "this is process %d +\n",my_current_task->pid);
+						        }     
+						    }
+						}
                     </pre>
                     <h4>myinterrupt.c</h4>
                     <pre class="brush:cpp">
-                            #include "mypcb.h"
+                        /*
+						*  linux/mykernel/myinterrupt.c
+						*
+						*  Kernel internal my_timer_handler
+						*
+						*  Copyright (C) 2013  Mengning
+						*
+						*/
+						#include &#60 linux/types.h&#62 
+						#include &#60 linux/string.h&#62 
+						#include &#60 linux/ctype.h&#62 
+						#include &#60 linux/tty.h&#62 
+						#include &#60 linux/vmalloc.h&#62 
 
-                            #define CREATE_TRACE_POINTS
-                            #include &#60trace/events/timer.h>
+						#include "mypcb.h"
 
-                            extern tPCB task[MAX_TASK_NUM];
-                            extern tPCB * my_current_task;
-                            extern volatile int my_need_sched;
-                            volatile int time_count = 0;
+						extern tPCB task[MAX_TASK_NUM];
+						extern tPCB * my_current_task;
+						extern volatile int my_need_sched;
+						volatile int time_count = 0;
 
-                            /*
-                            * Called by timer interrupt.
-                            * it runs in the name of current running process,
-                            * so it use kernel stack of current running process
-                            */
-                            void my_timer_handler(void)
-                            {
-                            #if 1
-                                // make sure need schedule after system circle 2000 times.
-                                //time_count每自增2000，进行调度
-                                if(time_count%2000 == 0 && my_need_sched != 1)
-                                {
-                                    my_need_sched = 1;
-                                }
-                                time_count ++ ;
-                            #endif
-                                return;
-                            }
+						/*
+						 * Called by timer interrupt.
+						 * it runs in the name of current running process,
+						 * so it use kernel stack of current running process
+						 */
+						void my_timer_handler(void)
+						{
+						#if 1
+							//time_count每自增1000，进行调度，时间片
+						    if(time_count%1000 == 0 && my_need_sched != 1)
+						    {
+						        printk(KERN_NOTICE ">>>my_timer_handler here<<<\n");
+						        my_need_sched = 1;
+						    } 
+						    time_count ++ ;  
+						#endif
+						    return;  	
+						}
 
-                            void all_task_print(void);//输出当前进程，以及进程组的信息
+						void my_schedule(void)
+						{
+						    tPCB * next;//下个进程
+						    tPCB * prev;//当前进程
 
-                            //按照优先级获得下一个需要执行的进程
-                            tPCB * get_next(void)
-                            {
-                                int pid,i;
-                                tPCB * point=NULL;
-                                tPCB * hig_pri=NULL;//points to the the hightest task
-                                all_task_print();
-                                hig_pri=my_current_task;
-                                for(i=0;i&#60MAX_TASK_NUM;i++)
-                                    if(task[i].priority&#60hig_pri->priority)  
-                                        hig_pri=&task[i];
-                                printk("higst process is:%d priority is:%d\n",hig_pri->pid,hig_pri->priority);
-                                return hig_pri;
-
-                            }//end of priority_schedule
-
-                            void my_schedule(void)
-                            {
-                                tPCB * next;//下个进程
-                                tPCB * prev;//当前进程
-                                // if there no task running or only a task ,it shouldn't need schedule
-                                if(my_current_task == NULL
-                                    || my_current_task->next == NULL)
-                                {
-                                    printk(KERN_NOTICE "time out!!!,but no more than 2 task,need not schedule\n");
-                                    return;
-                                }
-                                /* schedule */
-
-                                next = get_next();
-                                prev = my_current_task;
-                                printk(KERN_NOTICE "the next task is %d priority is %u\n",next->pid,next->priority);
-
-                                if(next->state == 0)/* -1 unrunnable, 0 runnable, >0 stopped */
-	                            {	//save current scene
-	                                //保存当前场景，切换到下一个进程
-	                                /* switch to next process */
-	                                asm volatile(  
-	                                    "pushl %%ebp\n\t" /* save ebp */
-	                                    "movl %%esp,%0\n\t" /* save esp */
-	                                    "movl %2,%%esp\n\t" /* restore esp */
-	                                    "movl $1f,%1\n\t" /* save eip */ //$1f是接下来的标号“1：”的位置也就是第76行，就是在调度执行下一个进程之前，把eip保存下来，便于恢复进程  
-	                                    "pushl %3\n\t"
-	                                    "ret\n\t" /* restore eip */
-	                                    "1:\t" /* next process start here */
-	                                    "popl %%ebp\n\t"
-	                                    : "=m" (prev->thread.sp),"=m" (prev->thread.ip)
-	                                    : "m" (next->thread.sp),"m" (next->thread.ip)
-	                                );
-                                    my_current_task = next;//switch to the next task
-                                    printk(KERN_NOTICE "switch from %d process to %d process\n >>>process %d running!!!&#60&#60&#60\n\n",prev->pid,next->pid,next->pid);
-
-                                }
-                                else//next->state != 0  进程未运行过
-                                {
-                                    next->state = 0;
-                                    my_current_task = next;
-                                    printk(KERN_NOTICE "switch from %d process to %d process\n  >>>process %d running!!!&#60&#60&#60\n\n\n",prev->pid,next->pid,next->pid);
-
-	                                 /* switch to new process */
-	                                 asm volatile(  
-	                                     "pushl %%ebp\n\t" /* save ebp */
-	                                     "movl %%esp,%0\n\t" /* save esp */
-	                                     "movl %2,%%esp\n\t" /* restore esp */
-	                                     "movl %2,%%ebp\n\t" /* restore ebp */
-	                                     "movl $1f,%1\n\t" /* save eip *///这句好像没用   
-	                                     "pushl %3\n\t"
-	                                     "ret\n\t" /* restore eip */
-	                                     : "=m" (prev->thread.sp),"=m" (prev->thread.ip)
-	                                     : "m" (next->thread.sp),"m" (next->thread.ip)
-	                                 );
-                                }
-                                return; 
-                            }//end of my_schedule
-
-                            void all_task_print(void)//输出当前进程，以及进程组的信息
-                            {
-                                int i,cnum=62;//
-                                printk(KERN_NOTICE "\n current task is:%d   all task in OS are:\n",my_current_task->pid);
-
-                                printk("        ");
-                                for(i=0;i&#60cnum;i++)
-                                    printk("-");
-                                printk("\n | process:");
-                                for(i=0;i&#60 MAX_TASK_NUM;i++)
-                                    printk("| %2d ",i);
-                                printk("|\n | priority:");
-                                for(i=0;i&#60MAX_TASK_NUM;i++)
-                                    printk("| %2d ",task[i].priority);
-
-                                printk("| \n");
-                                for(i=0;i&#60cnum;i++)
-                                    printk("-");
-                                printk("\n");
-                            }
+						    if(my_current_task == NULL 
+						        || my_current_task->next == NULL)
+						    {
+						    	return;
+						    }
+						    printk(KERN_NOTICE ">>>my_schedule<<<\n");
+						    /* schedule */
+						    next = my_current_task->next;//轮转
+						    prev = my_current_task;
+						    if(next->state == 0)/* -1 unrunnable, 0 runnable, >0 stopped */
+						    {
+						    	my_current_task = next; 
+						    	printk(KERN_NOTICE ">>>switch %d to %d<<<\n",prev->pid,next->pid);  
+						    	/* switch to next process */
+						    	asm volatile(	
+						        	"pushl %%ebp\n\t" 	    /* save ebp */
+						        	"movl %%esp,%0\n\t" 	/* save esp */
+						        	"movl %2,%%esp\n\t"     /* restore  esp */
+						        	"movl $1f,%1\n\t"       /* save eip */	
+						        	"pushl %3\n\t" 
+						        	"ret\n\t" 	            /* restore  eip */
+						        	"1:\t"                  /* next process start here */
+						        	"popl %%ebp\n\t"
+						        	: "=m" (prev->thread.sp),"=m" (prev->thread.ip)
+						        	: "m" (next->thread.sp),"m" (next->thread.ip)
+						    	); 
+						 	
+						    }
+						    else//next->state != 0  进程未运行过
+						    {
+						        next->state = 0;
+						        my_current_task = next;
+						        printk(KERN_NOTICE ">>>switch %d to %d<<<\n",prev->pid,next->pid);
+						    	/* switch to new process */
+						    	asm volatile(	
+						        	"pushl %%ebp\n\t" 	    /* save ebp */
+						        	"movl %%esp,%0\n\t" 	/* save esp */
+						        	"movl %2,%%esp\n\t"     /* restore  esp */
+						        	"movl %2,%%ebp\n\t"     /* restore  ebp */
+						        	"movl $1f,%1\n\t"       /* save eip */	
+						        	"pushl %3\n\t" 
+						        	"ret\n\t" 	            /* restore  eip */
+						        	: "=m" (prev->thread.sp),"=m" (prev->thread.ip)
+						        	: "m" (next->thread.sp),"m" (next->thread.ip)
+						    	);          
+						    }   
+						    return;	
+						}
                     </pre>
-                    <p>代码有点多，总结一下，执行过程。my_time_handler()函数，是个时间片轮转，周期性地发出中断信号，也就是my_need_sched。my_start_kernel()完成每个进程初始化，每个进程的任务都是my_process(),由于这个函数中有个无限循环，任务永远不会结束。任务需要调度时根据任务的优先级进行调度。</p>
+                    <p>代码有点多，总结一下，执行过程。my_time_handler()函数，是个时间片轮转，周期性地发出中断信号，也就是my_need_sched。my_start_kernel()完成每个进程初始化，每个进程的任务都是my_process(),由于这个函数中有个无限循环，任务永远不会结束。任务需要调度时根据任务链表顺序进行调度。</p>
                 </div>
             </div>
         </section>
