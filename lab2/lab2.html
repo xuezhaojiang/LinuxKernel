@@ -373,7 +373,7 @@
 						    	"pushl %1\n\t" 	        /* push ebp */
 						    	"pushl %0\n\t" 	        /* push task[pid].thread.ip */
 						    	"ret\n\t" 	            /* pop task[pid].thread.ip to eip */
-						    	"popl %%ebp\n\t"
+						    	"popl %%ebp\n\t" //不会执行,但不仅仅为了对称，在这个程序中进程是无限循环，不会返回执行这个pop,但真实的程序会返回执行这句
 						    	: 
 						    	: "c" (task[pid].thread.ip),"d" (task[pid].thread.sp)	/* input c or d mean %ecx/%edx*/
 							);
@@ -461,16 +461,15 @@
 						    	asm volatile(	
 						        	"pushl %%ebp\n\t" 	    /* save ebp */
 						        	"movl %%esp,%0\n\t" 	/* save esp */
-						        	"movl %2,%%esp\n\t"     /* restore  esp */
-						        	"movl $1f,%1\n\t"       /* save eip */	
+						        	"movl %2,%%esp\n\t"     /* restore  esp */ //恢复
+						        	"movl $1f,%1\n\t"       /* save eip */	//67行语句地址
 						        	"pushl %3\n\t" 
-						        	"ret\n\t" 	            /* restore  eip */
+						        	"ret\n\t" 	            /* restore  eip */ //调到popl
 						        	"1:\t"                  /* next process start here */
 						        	"popl %%ebp\n\t"
 						        	: "=m" (prev->thread.sp),"=m" (prev->thread.ip)
 						        	: "m" (next->thread.sp),"m" (next->thread.ip)
-						    	); 
-						 	
+						    	);
 						    }
 						    else//next->state != 0  进程未运行过
 						    {
@@ -483,7 +482,7 @@
 						        	"movl %%esp,%0\n\t" 	/* save esp */
 						        	"movl %2,%%esp\n\t"     /* restore  esp */
 						        	"movl %2,%%ebp\n\t"     /* restore  ebp */
-						        	"movl $1f,%1\n\t"       /* save eip */	
+						        	"movl $1f,%1\n\t"       /* save eip */	//也是第67行的地址
 						        	"pushl %3\n\t" 
 						        	"ret\n\t" 	            /* restore  eip */
 						        	: "=m" (prev->thread.sp),"=m" (prev->thread.ip)
@@ -493,7 +492,9 @@
 						    return;	
 						}
                     </pre>
-                    <p>代码有点多，总结一下，执行过程。my_time_handler()函数，是个时间片轮转，周期性地发出中断信号，也就是my_need_sched。my_start_kernel()完成每个进程初始化，每个进程的任务都是my_process(),由于这个函数中有个无限循环，任务永远不会结束。任务需要调度时根据任务链表顺序进行调度。</p>
+                    <p>代码有点多，总结一下，执行过程。my_time_handler()函数，是个时间片轮转，周期性地发出中断信号，也就是my_need_sched。my_start_kernel()完成每个进程初始化，每个进程的任务都是my_process(),由于这个函数中有个无限循环，任务永远不会结束；并且启动了0号进程。任务需要调度时根据任务链表顺序进行调度。</p>
+                    <p>来看my_process()函数，先不看my_schedule()函数，并且假设只有两个进程0号和1号，便于分析。my_process()执行过程就是，0号进程启动，执行到77行my_schedule()，被调度到了1号进程，1号进程从65行也就是1号进程的起始开始执行，执行到77行，又调度回0号进程，0号进程从78行继续执行，执行到81行，回到68行继续下一次循环，又执行到77行进行调度.......</p>
+                    <p>下面来看my_schedule()函数，依然假设进程从0号切换到1号再切到0号。0号进程启动后，在my_process()的第77行中进入my_schedule(),执行到my_schedule()的第55行判断一下，由于1号进程没有运行过，next-state!=0,跳到73行，接着运行到80行，保存0号进程的ebp到栈中,81行和84行是保存0号进程的sp,ip;82,83,85行是启动1号进程。1号进程从my_process()函数的起始开始执行，又进入my_schedule()函数，执行到my_schedule()的第55行判断一下，由于0号进程运行过，next-state==0,继续执行，第61行保存1号进程的ebp到栈中,62行和64行是保存1号进程的sp,ip;63行、65行和66行是恢复0号进程。由于之前0号进程保存的ip指向的是67行，所以这次0号进程从my_schedule的第67行恢复执行，由于63行恢复了0号进程的esp,所有68行正确恢复0号进程的ebp,0号进程执行my_schedule()的第91行，回到my_process()的第79行，由运行到68行开始新的循环，又从77行进入my_schedule(),这次执行到my_schedule()的第55行，1号进程运行过，继续执行第57行，又开始保存0号进程，以及恢复1号进程从67行继续执行.......</p>
                 </div>
             </div>
         </section>
