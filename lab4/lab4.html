@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+
+<head lang="en">
+    <meta charset="utf-8">
+    <title>linux core lab3</title>
+    <!-- <link rel="stylesheet" href="css/normalize.css" type="text/css"> -->
+    <link rel="stylesheet" href="css/main.css" type="text/css">
+    <link href="https://cdn.bootcss.com/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet">
+</head>
+
+<body>
+    <header>
+        <title>系统调用</title>
+        <h1>使用库函数API和C代码中嵌入汇编代码两种方式使用同一个系统调用</h1>
+        <p>薛兆江 + 原创作品转载请注明出处 + <a href="http://mooc.study.163.com/course/USTC-1000029000">《Linux内核分析》MOOC课程</a>http://mooc.study.163.com/course/USTC-1000029000</p>
+    </header>
+    <content>
+        <section id="target">
+            <h2>学习目标</h2>
+            <p>选择一个系统调用（13号系统调用time除外），系统调用列表参见<a href="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git/tree/arch/x86/syscalls/syscall_32.tbl?h=linux-3.18.y&id=v3.18.48">系统调用表</a>
+            </p>
+            <p>参考视频中的方式使用库函数API和C代码中嵌入汇编代码两种方式使用同一个系统调用</p>
+        </section>
+        <section id="abc">
+            <h2>基础知识</h2>
+            <div id="系统调用概念">
+                <h3>系统调用概念</h3>
+                <p>Linux系统在CPU的保护模式下提供了四个特权级别，目前内核都只用到了其中的两个特权级别，分别为“特权级0”和“特权级3”,级别0也就是我们通 常所讲的内核模式，级别3也就是我们通常所讲的用户模式。划分这两个级别主要是对系统提供保护。内核模式可以执行一些特权指令和进入用户模式，而用户模式 则不能。CPU每条指令的读取都是通过cs:eip，cs寄存器最低两位表明了当前代码的特权级。内核态下可访问所有地址空间。0xc0000000（逻辑地址）以上的空间只能在内核态下访问。0x00000000 ~ 0xbfffffff 内核态和用户态均可访问。内核模式与用户模式分别使用自己的堆栈，当发生模式切换的时候同时要进行堆栈的切换。系统调用就是用户空间应用程序和内核提供的服务之间的一个接口。由于服务是在内核中提供的，因此无法执行直接调用，必须使用一个进程来跨越用户空间与内核之间的界限。
+                </p>
+                <p>系统调用接口的主要任务是把进程从用户态切换到内核态。在具有保护机制的计算机系统中，用户必须通过软件中断或陷阱，才能使进程从用户态切换为内核态。在i386体系中，Linux的系统调用接口是通过调用软中断指令“int 0x80”使进程从用户态进入内核态的，这个过程也叫做“陷入”。当系统调用接口调用软中断指令“int 0x80”时，这个指令会发生一个中断向量码为128的中断请求，并在中断响应过程中将进程由用户态切换为内核态。</p>
+                <p> 中断有两个重要的属性，中断号和中断处理程序。中断号用来标识不同的中断，不同的中断具有不同的中断处理程序。在操作系统内核中维护着一个中断向量表（Interrupt Vector Table），这个数组存储了所有中断处理程序的地址，而中断号就是相应中断在中断向量表中的偏移量。每个系统调用都是通过一个单一的入口点多路传入内核。eax 寄存器用来标识应当调用的某个系统调用，这在C库中做了指定（来自用户空间应用程序的每个调用）。当加载了系统的 C 库调用索引和参数时，就会调用一个软件中断（0x80 中断），它将执行 system_call 函数（通过中断处理程序），这个函数会按照 eax 内容中的标识处理所有的系统调用。在经过几个简单测试之后，使用 system_call_table和eax中包含的索引来执行真正的系统调用了。从系统调用中返回后，最终执行syscall_exit，并调用 resume_userspace返回用户空间。然后继续在C库中执行，它将返回到用户应用程序中。</p>
+                <p>对于系统调用我们要搞清楚两点：1. 系统调用的函数名称转换。2. 系统调用的参数传递。实际上，Linux中处理系统调用的方式与中断类似。每个系统调用都有相应的系统调用号作为唯一的标识，内核维护一张系统调用表，表中的元素是系统调用函数的起始地址，而系统调用号就是系统调用在调用表的偏移量。在进行系统调用是只要指定对应的系统调用号, Linux中是通过寄存器%eax传递系统调用号。对于参数传递，Linux是通过寄存器完成的。Linux最多允许向系统调用传递6个参数，分别依次由%ebx，%ecx，%edx，%esi，%edi和%ebp这个6个寄存器完成。这6个寄存器可能已经被使用，所以在传参前必须把当前寄存器的状态保存下来，待系统调用返回后再恢复。</p>
+            </div>
+        </section>
+        <section id="experiment">
+            <h2>实验部分</h2>
+            <div id="实验步骤">
+                <h3>实验步骤</h3>
+                <h4>使用:man 2 write 查看write函数</h4>
+                <img src="img/0.jpg">
+                <<p>write函数是4号系统调用，有三个参数。第0个参数，输出位置；第1个参数，指向输出内容的指针；第2个参数，输出内容的长度。</p>
+                    <h4>调用write库函数</h4>
+                    <img src="img/1.jpg">
+                    <p>write函数的第0个参数中的1指的是屏幕。0，1，2文件描述符代表标准输入设备（键盘），标准输出设备（显示器）和标准错误设备（显示器）。</p>
+                    <h4>运行结果图</h4>
+                    <img src="img/2.jpg">
+                    <h4>嵌入汇编代码调用库函数</h4>
+                    <img src="img/3.jpg">
+                    <p>第0个参数传入ebx,第1个参数传入ecx,第2个参数传入edx。</p>
+                    <p>由于在内嵌汇编的输入部分，已经将字符串地址传入了ecx,所以传入arg1的一行是可以删除的。不过为了显示函数需要传入的参数，保留了这一行。</p>
+                    <p>int a存放函数返回值。</p>
+                    <h4>运行结果图</h4>
+                    <img src="img/4.jpg">
+            </div>
+            <div class="">
+                <h3>总结</h3>
+                <div class="summary">
+                    <p>总结一下综上所述，系统调用接口需要完成以下几个任务：</p>
+                    <p>1.用软中断指令“int 0x80”发生一个中断向量码为128的中断请求，以使进程进入内核态。</p>
+                    <p>2.要保护用户态的现场，即把处理器的用户态运行环境保护到进程的内核堆栈。</p>
+                    <p>3.为内核服务例程准备参数，并定义返回值的存储位置。</p>
+                    <p>4.跳转到系统调用例程。</p>
+                    <p>5.系统调用例程结束后返回。系统调用例程是系统提供的一个通用的汇编语言程序．其实它是一个中断向量为128的中断服务程序，其入口为system_call。它应完成的任务有：接受系统调用接口的参数;根据系统调用号，转向对应的内核服务例程，并将相关参数传遴给内核服务例程;在内核服务例程结束后，自中断返田到系统凋甩接口。
+                    </p>
+                </div>
+            </div>
+        </section>
+        <section id="reference">
+            <h2>参考资料</h2>
+            <p>
+                <a href="http://blog.chinaunix.net/uid-14735472-id-2930265.html">Linux 系统调用 </a>
+            </p>
+            <p>
+                <a href="http://blog.csdn.net/chosen0ne/article/details/7721550">系统调用的实现原理</a>
+            </p>
+            <p>
+                <a href="http://www.cnblogs.com/hyq20135317/p/5293224.html">系统调用</a>
+            </p>
+        </section>
+    </content>
+    <footer>
+        <ul class="share-group">
+            <li><i class="fa fa-weixin fa-2x"></i>微信
+                <br>xue-zhaojiang</li>
+            <li><i class="fa fa-qq fa-2x"></i>QQ
+                <br>602431866</li>
+            <li><i class="fa fa-weibo fa-2x"></i>新浪微博
+                <br>小皇叔666</li>
+            <li><i class="fa fa-github fa-2x"></i>GitHub
+                <br>xuezhaojiang</li>
+        </ul>
+    </footer>
+</body>

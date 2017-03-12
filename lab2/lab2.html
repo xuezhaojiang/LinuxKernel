@@ -466,7 +466,7 @@
 						        	"pushl %3\n\t" 
 						        	"ret\n\t" 	            /* restore  eip */ //调到popl
 						        	"1:\t"                  /* next process start here */
-						        	"popl %%ebp\n\t"
+						        	"popl %%ebp\n\t"        // restore ebp
 						        	: "=m" (prev->thread.sp),"=m" (prev->thread.ip)
 						        	: "m" (next->thread.sp),"m" (next->thread.ip)
 						    	);
