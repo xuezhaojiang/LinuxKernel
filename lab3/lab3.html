@@ -259,7 +259,7 @@
 							 * the init task will end up wanting to create kthreads, which, if
 							 * we schedule it before we create kthreadd, will OOPS.
 							 */
-							kernel_thread(kernel_init, NULL, CLONE_FS);//init进程在此时创建好了，但是现在还不能调度它，会阻塞在wait_for_completion处,等待kthreadd_done Signal,以便往后继续执行下去.。
+							kernel_thread(kernel_init, NULL, CLONE_FS);//kernel_init是个方法，init进程在此时创建好了，但是现在还不能调度它，会阻塞在wait_for_completion处,等待kthreadd_done Signal,以便往后继续执行下去。
 							numa_default_policy();//设定NUMA（Non-Uniform Memory Access Architecture）系统的内存访问策略为默认。
 							pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);//创建kthreadd内核线程，它的作用是管理和调度其它内核线程。
 							rcu_read_lock();
