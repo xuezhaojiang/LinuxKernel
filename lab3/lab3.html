@@ -293,7 +293,7 @@
 
 							flush_delayed_fput();
 
-							if (ramdisk_execute_command) {
+							if (ramdisk_execute_command) {//这也就是Linux系统中的1号进程，是第一个用户态进程，默认是根目录下的一个程序；如果根目录下没有这个进程，系统会寻找其他的默认进程作为1号进程，当系统没有进程需要执行时就调度到idle进程。
 								ret = run_init_process(ramdisk_execute_command);
 								if (!ret)
 									return 0;
