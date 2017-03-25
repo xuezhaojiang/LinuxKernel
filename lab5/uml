@@ -1,0 +1,16 @@
+@startuml
+	:ENTRY(system_call);
+	:SAVE_ALL;
+	:调用中断服务函数保存返回值;
+	if (是否还有其他工作？) then (否)
+	elseif (是否有syscall退出信号？) then (是)
+	elseif (是否有调度信号？) then (是)
+		 	:call schedule;
+	else (否)
+		:work_notifysig处理挂起的信号;
+	endif
+	
+	:RESTORE_ALL;
+	:INTERRUPT_RETURN;
+	:ENDPROC(system_call);
+@enduml
