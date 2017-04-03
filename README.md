@@ -2,7 +2,7 @@
 薛兆江 + 原创作品转载请注明出处 + [《Linux内核分析》MOOC课程](http://mooc.study.163.com/course/USTC-1000029000)
 http://mooc.study.163.com/course/USTC-1000029000     
 ## 实验报告列表
-### 1.[分析一个简单C程序的汇编代码，理解计算机如何工作](https://xuezhaojiang.github.io/LinuxCore/lab1/lab1.html)    ## 
+### 1.[分析一个简单C程序的汇编代码，理解计算机如何工作](https://xuezhaojiang.github.io/LinuxCore/lab1/lab1.html)     
 &emsp&emsp 汇编语言基础知识、C语言函数调用过程中的堆栈变化和参数传递过程。     
 ### 2.[完成一个简单的时间片轮转多道程序内核代码](https://xuezhaojiang.github.io/LinuxCore/lab2/lab2.html)    
 &emsp&emsp 模拟存储程序计算机工作模型，时钟中断和进程切换      
