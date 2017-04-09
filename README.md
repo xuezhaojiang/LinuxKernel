@@ -15,6 +15,7 @@ http://mooc.study.163.com/course/USTC-1000029000
 ### 6.[分析Linux内核创建一个新进程的过程](https://xuezhaojiang.github.io/LinuxCore/lab6/lab6.html)     
 &nbsp;&nbsp; 关于进程的描述和创建。主要包括PCB的组织形式、进程的数据结构进程描述符、fork系统调用的关键执行过程。      
 ### 7.[Linux内核如何装载和启动一个可执行程序](https://xuezhaojiang.github.io/LinuxCore/lab7/lab7.html)     
+&nbsp;&nbsp; 静态链接、动态链接（加载时链接、运行时链接）；exec库函数加载可执行文件。
 ### 8.[未完成](https://xuezhaojiang.github.io/LinuxCore/lab8/lab8.html)     
 &nbsp;&nbsp;       
 
