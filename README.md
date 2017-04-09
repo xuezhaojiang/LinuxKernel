@@ -14,6 +14,7 @@ http://mooc.study.163.com/course/USTC-1000029000
 &nbsp;&nbsp; 添加一个自己编写的系统调用，加深对系统调用在内核代码中的处理过程的理解。      
 ### 6.[分析Linux内核创建一个新进程的过程](https://xuezhaojiang.github.io/LinuxCore/lab6/lab6.html)     
 &nbsp;&nbsp; 关于进程的描述和创建。主要包括PCB的组织形式、进程的数据结构进程描述符、fork系统调用的关键执行过程。      
-### 7.[未完成](https://xuezhaojiang.github.io/LinuxCore/lab7/lab7.html)     
+### 7.[Linux内核如何装载和启动一个可执行程序](https://xuezhaojiang.github.io/LinuxCore/lab7/lab7.html)     
+### 8.[未完成](https://xuezhaojiang.github.io/LinuxCore/lab8/lab8.html)     
 &nbsp;&nbsp;       
 

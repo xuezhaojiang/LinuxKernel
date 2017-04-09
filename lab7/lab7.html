@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+
+<head lang="en">
+    <meta charset="utf-8">
+    <title>linux core lab7</title>
+    <!-- <link rel="stylesheet" href="css/normalize.css" type="text/css"> -->
+    <link rel="stylesheet" href="css/main.css" type="text/css">
+    <link type="text/css" rel="stylesheet" href="css/shCore.css" />
+    <link type="text/css" rel="stylesheet" href="css/shCoreDefault.css" />
+    <link type="text/css" rel="stylesheet" href="styles/shThemeDefault.css">
+    <script type="text/javascript" src="js/shCore.js"></script>
+    <script type="text/javascript" src="js/shBrushCpp.js"></script>
+    <link href="https://cdn.bootcss.com/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet">
+    <script type="text/javascript">
+    SyntaxHighlighter.all();
+    </script>
+</head>
+
+<body>
+    <header>
+        <title>Linux内核如何装载和启动一个可执行程序</title>
+        <h1>Linux内核如何装载和启动一个可执行程序</h1>
+        <p>薛兆江 + 原创作品转载请注明出处 + <a href="http://mooc.study.163.com/course/USTC-1000029000">《Linux内核分析》MOOC课程</a>http://mooc.study.163.com/course/USTC-1000029000</p>
+    </header>
+    <content>
+        <section id="target">
+            <h2>学习目标</h2>
+            <p>理解编译链接的过程和ELF可执行文件格式</p>
+            <p>编程使用exec库函数加载一个可执行文件，动态链接分为可执行程序装载时动态链接和运行时动态链接，编程练习动态链接库的这两种使用方式</p>
+            <p>使用gdb跟踪分析一个execve系统调用内核处理函数sys_execve ，验证您对Linux系统加载可执行程序所需处理过程的理解</p>
+            <p>特别关注新的可执行程序是从哪里开始执行的？为什么execve系统调用返回后新的可执行程序能顺利执行？对于静态链接的可执行程序和动态链接的可执行程序execve系统调用返回时会有什么不同？</p>
+        </section>
+        <section id="abc">
+            <h2>基础知识</h2>
+            <div id="LinuxSource">
+                <p>链接是将各种代码和数据部分收集起来并组合成为一个单一文件的过程。这个文件可以被加载到存储器并执行。 链接可执行与编译时，也就是在源代码被翻译成机器代码时；也可执行与加载时，也就是程序被加载器加载到存储器并执行时；甚至执行与运行时，由应用程序来执行。在现代系统中，链接是由叫做链接器的程序自动执行的。</p>
+                <p>链接器使得分离编译成为可能。可以把应用程序分离成更小，更好管理的模块，分别独立地修改和编译这些模块，并通过链接应用。</p>
+                <h3>编译器驱动程序</h3>
+                <p>大多数编译系统提供编译驱动程序，它代表用户在需要时调用语言预处理器、编译器、汇编器和链接器。编译驱动程序包含这些功能。GCC编译驱动程序：cpp（c预处理器，把main.c翻译成ASCII码的中间文件main.i），ccl（c编译器,翻译成ASCII汇编语言文件main.s），as（汇编器，翻译成可重定位目标文件main.o），ld（链接器，创建可执行文件p）。 unix>./p时，shell调用操作系统中一个叫做加载器的函数，它拷贝可执行程序p中的代码和数据到存储器，然后将控制转移到这个程序的开头。
+                </p>
+                <h3>静态链接</h3>
+                <p>想Unix ld程序这样的静态链接器以一组可重定位目标文件和命令行参数作为输入，生成一个完全链接的可以加载和运行的可执行目标文件作为输出。输入的可重定位目标文件由各种不同的代码和数据节组成。</p>
+                <p>为了构造可执行文件，链接器必须完成两个主要任务：（1）符号解析。目标文件定义和引用的符号，将每个符号引用刚好和一个符号定义联系起来。（2）重定位。编译器和汇编器生成从地址0开始的代码和数据节。链接器将每个符号定义与一个存储器位置联系起来， 然后修改所有对这些符号的引用，使得它们指向这个存储器位置，从而重定位这些节。 </p>
+                <h3>目标文件</h3>
+                <p>目标文件有3中形式：可重定位目标文件，可执行目标文件，共享目标文件。</p>
+                <p>可重定位目标文件。包含二进制代码和数据，其形式可以在编译时与其他可重定位目标文件合并起来，创建一个可执行目标文件。</p>
+                <p>可执行目标文件。包含二进制代码和数据，其形式可以被直接拷贝到存储器并执行。</p>
+                <p>共享目标文件。一种特殊类型的可重定位目标文件，可以在加载或者运行地被动态地加载到存储器并链接。</p>
+                <p>编译器和汇编器生成可重定位目标文件（包括共享目标文件）。链接器生成可执行目标文件。从技术上来说，一个目标模块就是一个字节序列，而一个目标文件就是一个存放在磁盘文件中的目标模块。</p>
+                <p>目标文件的格式，也就是目标模块的字节编码规则，在各个系统中都不相同。 有COFF，PE，ELF；概念都是类似的。现代UNIX系统使用的都是ELF——可执行和可链接格式。之后讨论ELF(EXECUTABLE AND LINKABLE FORMAT)。
+                </p>
+                <h3>可重定位目标文件</h3>
+                <p> 一个典型的ELF可重定位目标文件的格式。</p>
+                <img src="img/0.jpg" alt="">
+                <p>ELF头（ELF header）以一个16字节的序列开始，这个序列描述了生成该文件的系统的字的大小和字节顺序。ELF头剩下的部分包含帮助链接器语法分析和解释目标文件的信息。其中包括ELF头的大小、目标文件的类型（如可重定位、可执行或是共享的）、机器类型（如IA32）、节头部表的文件偏移，以及节头部表中的条目大小和数量。不同的节的位置和大小是由节头部表描述的，其中目标文件中每个节都有一个固定大小的条目。</p>
+                <p>夹在ELF头和节头部表之间的都是节。一个典型的ELF可重定位目标文件包含下面几个节：</p>
+                <p>.text 已编译程序的机器代码</p>
+                <p>.rodata 只读数据</p>
+                <p>.data 已初始化的全局C变量。局部C变量在运行时保存在栈中，既不出现在.data节中 ，也不出现在.bss节中。</p>
+                <p>.bass 未初始化的全局C变量。在目标文件中这个节不占据实际的空间，它仅仅是一个占位符。目标文件格式区分初始化和未初始化变量是为了空间效率：在目标文件中，未初始化变量不需要占据任何实际的磁盘空间。</p>
+                <p>.symtab 一个符号表，它存放在程序中定义和引用的函数和全局变量的信息。每个可重定位目标文件在.symtab中都有一张符号表 。</p>
+                <p>.rel.text 一个.text节中位置的列表，当链接器吧这个目标文件和其他文件结合时，需要修改这些位置。一般而言，任何调用外部函数或引用全局变量的指令都需要修改。另一方面，调用本地函数的指令则不需要修改。注意，可执行目标文件中并不需要重定位信息，因此通常省略，除非用户显示第指示链接器包含这些信息。</p>
+                <p>.rel.data 被模块引用或定义的任何全局变量的重定位信息。一般而言，任何已初始化的全局变量，如果它的初始值是一个全局变量地址或者外部定义函数的地址，都需要被修改。</p>
+                <p>.debug 一个调试符号表，其条目是程序总定义的局部变量和类型定义，程序中定义和引用的 全局变量，以及原始的C源文件。</p>
+                <p>.line 原始C源文件中的行号和.text节中机器指令之间的映射。</p>
+                <p>.strtab 一个字符串表，其内容包括.symtab和.debug节中的符号表，以及节头部中的节名字。</p>
+                <h3>符号和符号表</h3>
+                <p>每个可重定位目标模块m都有一个符号表，包含m所定义和引用的符号的信息。 在链接器的上下文中，三种不同的符号：
+                </p>
+                <p>1.由m定义并能被其他模块引用的全局符号。全局链接器对应于非静态的C函数以及被定义为不带static属性的全局变量。</p>
+                <p>2.由其他模块定义并被模块m以引用的全局符号——外部符号，对应于定义在其他模块中的C函数和变量</p>
+                <p>3.只被模块m定义和引用的本地符号。有的本地链接器符号对应于带static属性的C函数和全局变量。</p>
+                <p>任何声明带有static属性的全局变量或者函数都是模块私有的。类似地，任何声明为不带static属性的全局变量和函数都是公有的，可以被其他模块访问的。</p>
+                <p>符号表是由汇编器构造的，使用编译器输出到汇编语言.s文件中的符号。</p>
+                <h3>符号解析</h3>
+                <p>链接器解析符号引用的方法是将每个引用与它输入的可重定位目标文件的符号表中的艺哥确定的符号定义联系起来。对那些和引用定义在相同模块中的本地符号引用，符号解析是非常简单明了的。编译器只允许每个模块中每个本地符号只有一个定义。编译器还确保静态本地变量，它们也会有本地链接器符号，拥有唯一的名字。</p>
+                <h4>链接器如何解析多重定义的全局符号</h4>
+                <p>不过，对于全局符号的引用解析就棘手得多。当编译器遇到一个不是在当前模块中定义的符号（变量或者函数名），它会假设该符号是在其他模块中定义的，生成一个链接器符号表条目，并把它交给链接器处理。多个目标文件中如果定义相同的符号，链接器要么标志一个错误，要么以某种方法选出一个定义并抛弃其他定义。在编译是，编译器向汇编器输出每个全局符号，或者是强或者是弱，而汇编器把这个信息隐含地编码在可重定位目标文件的符号表里。函数和已初始化的全局变量时强符号，未初始化的全局变量是弱符号。</p>
+                <h4>与静态库链接</h4>
+                <p>迄今为止，我们都是假设连接器读取一组可重定位目标文件，并把它们链接起来，成为一个输出的可执行文件，实际上，所有的编译器系统都提供一种机制，将所有相关的目标模块打包成一个单独的文件，称为静态库，它可以用作链接器的输入。当连接器构造一个输出的可执行文件时，它只拷贝静态库中被程序引用的目标模块。</p>
+                <p>在Unix系统中，静态库以一种称为存档的特殊文件格式存放在磁盘中。存档文件是一组连接起来的可重定位目标文件的集合，有一个头部用来描述每个成员目标文件的大小和位置。存档文件名由后缀.a标识。</p>
+                <h4>链接器如何使用静态库来解析引用</h4>
+                <p>在符号解析的阶段，链接器从左到右按照它们在编译器驱动程序命令行上出现的相同顺序来扫描可重定位目标文件和存档文件。在这次扫描中，链接器维持一个可重定位目标文件的集合E（这个集合中的文件会被合并起来形成可执行文件），一个未解析的符号（即引用了但是尚未定义的符号）集合U，以及一个在前面输入文件中已定义的符号集合D。初始时，E、U和D都是空的。</p>
+                <p>关于库的一般准则是将它们放在命令行的结尾。如果各个库的成员是相互独立的（也就是说没有成员引用另一个成员定义的符号），那么这些库就可以按照任何顺序放置在命令行的结尾处。另一方面，如果库不是相互独立的，那么它们必须排序，使得每个库成员文件外部引用的符号s，在命令行中至少有一个s的定义是在对s的引用之后的。
+                </p>
+                <h3>重定位</h3>
+                <p>一旦链接器完成了符号解析这一步，它就是把代码中的每个符号引用和确定的一个符号定义（即它的一个输入目标模块中的一个符号表条目）联系起来。在此时，链接器就知道它的输入目标模块中的代码节和数据节的确切大小。现在就可以开始重定位了，在这个步骤中，将合并输入模块，并为每个符号分配运行时地址。重定位有两步组成：</p>
+                <p>1.重定位节和符号定义。在这一步中，链接器将所有相同类型的节合并为同一类型的新的聚合节。然后，链接器将运行时存储器地址赋给新的聚合节，赋给输入模块定义的每个节，以及赋给输入模块定义的每个符号。当这一步完成时，程序中的每个指令和全局变量都有唯一的运行时存储器地址了。</p>
+                <p>2.重定位节中的符号引用。在这一步中，链接器修改代码节和数据节中对每个符号的引用，使得它们指向正确的运行时地址。为了执行这一步，链接器依赖于称为重定位条目的可重定位目标模块中的数据结构。</p>
+                <h3>可执行目标文件</h3>
+                <p> 可执行目标文件的格式类似于可重定位目标文件的格式。ELF头部描述文件的总体格式。它还包括程序的入口点，也就是当程序运行时要执行的第一条指令的地址。.text 、.rodata和.data 节和可重定位目标文件中的节是相似的，除了这些节已经被重定位到它们最终的运行时存储器地址以外。.init节定义了一个小函数，叫做_init，程序的初始化代码会调用它。因为可执行文件是完全链接的（已被重定位了），所以它不再需要.rel节。</p>
+                <p>ELF可执行文件被设计得很容易加载到存储器，可执行文件的连续的片被映射到连续的存储器段。段头部表描述了这种映射关系。</p>
+                <img src="img/1.jpg" alt="">
+                <h3>加载可执行目标文件</h3>
+                <p>要运行可执行目标文件p，可以在Unix外壳的命令行中输入它的名字：unix> ./p</p>
+                <p>因为p不是一个内置的外壳命令，所以外壳会认为p是一个可执行目标文件，通过调用某个驻留在存储器中的称为加载器（loader）的操作系统代码来运行它。任何Unix程序都可以通过调用execve函数来调用加载器。加载器将可执行目标文件中的代码和数据从磁盘拷贝到存储器中，然后通过跳转到程序的第一条指令或入口点来运行该程序。这个将程序拷贝到存储器并运行的过程叫做加载。</p>
+                <p>每个Unix程序都有一个运行时存储器映像。如图7-13。例如：在32位Linux系统中，代码段总是从地址（0x8048000）处开始。数据段是在接下来的下一个4KB对齐的地址处。运行时堆在读/写段之后接下来的第一个4KB对齐的地址处，并童工调用malloc库往上增长。还有一个段是为共享库保留的。用户栈总是从最大的合法用户地址开始，向下增长的（向低存储器地方向增长）。从栈的上部开始的段是为操作系统驻留存储器的部分（也就是内核）的代码和数据保留的。</p>
+                <img src="img/2.jpg" alt="">
+                <p>当程序加载时，会创建如图所示的存储器映像。在可执行文件中段头部表的指导下，加载器将可执行文件的相关内容拷贝到代码和数据段。接下来，加载器跳转到程序的入口点，也就是符号_start的地址。在_start地址处的启动代码是在目标文件ctrl.o中定义的，对所有的C程序都是一样的。在从.text和.init节中调用了初始化例程后，启动代码调用atexti例程，这个程序附加了一系列在应用程序正常中止时应该调用的程序。exit函数运行atexit注册的函数，然后通过调用_exit将控制返回给操作系统。接着，启动代码调用应用程序的main程序，它会开始执行我们的C代码。在应用程序返回之后，启动代码调用_exit程序，它将控制返回给操作系统。</p>
+                <p>UNIX系统中的每个程序都运行在一个进程上下文中，有自己的虚拟地址空间。当外壳运行一个程序时，父外壳进程生成一个子进程，它是父进程的一个复制品。子进程通过execve系统调用启动加载器。加载器删除子进程现有的虚拟存储器段，并创建一组新的代码、数据、堆和栈段、新的栈和堆段被初始化为零。通过将虚拟地址空间中的页映射到可执行文件的页大小的片，新的代码和数据段被初始化为可执行文件的内容。最后，加载器跳转到_start地址，它最终会调用应用程序的main函数。除了一些头部信息，在加载过程中没有任何从磁盘到存储器的数据拷贝。直到CPU应用一个被映射的虚拟页才会进行拷贝，此时，操作系统利用它的页面调度机制自动将页面从磁盘传送到存储器。</p>
+                <h3>动态链接共享库</h3>
+                <p>静态库的更新与维护，需要将程序显式地与更新了的库重新链接。几乎每个程序都使用的标准输入输出函数，在运行时，这些函数的代码会被复制到每个运行进程的文本段中，造成存储器资源浪费。</p>
+                <p>共享库是致力与解决静态库缺陷的一个现代创新产物。共享库是一个目标模块，在运行时，可以加载到任意的存储器地址，并加一个在存储器中的程序链接起来。这个过程称为动态链接，是由一个叫做动态链接器的程序来执行的。共享库也称为共享目标，在Unix系统中通常用.so后缀来表示。在微软操作系统中称为DLL。</p>
+                <p>共享库是以两种不同方式来“共享”的，首先在任何给定的文件系统中，对于一个库只有一个.so文件，所有引用该库的可执行目标文件共享这个.so文件中的代码和数据，而不是像静态库的内容那样被拷贝和嵌入到引用它们的可执行文件中，其次，在存储器中，一个共享的.text节的一个副本可以被不同正在运行的进程共享。</p>
+                <p>基本的思路是当创建可执行文件时，静态执行一些链接，然后在程序加载时，动态完成链接过程。</p>
+            </div>
+        </section>
+        <section id="experiment">
+            <h2>实验部分</h2>
+            <div id="实验步骤">
+                <h3>实验步骤</h3>
+                <h4>可执行文件的创建</h4>
+                <p>-E参数就是生成预处理后的文件;</p>
+                <p>-S该选项只进行编译而不进行汇编，生成汇编代码;</p>
+                <p>-c汇编把编译阶段生成的.s文件转成二进制目标代码;</p>
+                <p>链接将编译输出.o文件链接成最终的可执行文件</p>
+                <img src="img/3.jpg" alt="">
+                <p>查看各个文件大小，静态链接生成的文件要大。</p>
+                <img src="img/4.jpg" alt="">
+                <p>查看共享库依赖，静态链接的不依赖共享库。</p>
+                <img src="img/11.jpg" alt="">
+                <p>查看elf头信息,从图中可以看出真正的代码从0x8048320开始，这才是真正的程序入口</p>
+                <img src="img/5.jpg" alt="">
+                <h4>参数的传递过程</h4>
+                <p>查看execve函数信息.</p>
+                <p>shell就是用户键入命令，加载并执行可执行程序的控制台。会调用execve将命令行参数和环境参数传递给可执行程序的main函数</p>
+                <img src="img/6.jpg" alt="">
+                <p>execve是如何从内核态将参数传给进程（假设该进程是用户态）的用户态堆栈的？</p>
+                <p>发现，仍是从用户态的数据段中复制到用户态堆栈中的。那么跟内核什么关系呢？执行execve的进程就是当前的shell，所以参数首先会被压在当前shell进程的内核堆栈中。关键在传入内核的参数是指针，所以内核（sys_execve）要做的就是把指针的值复制回新进程的代码段，再复制到进程的用户堆栈段。初始化后的进程内存地址空间就是第二张图那样。也就解释了sys_execve加载进程并初始化的作用、结果。shell每次都fork一个shell去执行命令，所以，当新进程起来后，启动它的shell结束，曾经保存的参数就不要了。</p>
+                <img src="img/10.jpg" alt="">
+                <p>上面这段话是往年的师兄师姐的博客写的。个人认为写的不是很清楚。这个又不好调试跟踪，简单谈谈自己的想法，希望有高人指点一二。</p>
+                <p>真实的shell中。接受用户输入（比如输入个ls -l），把参数保存在shell的堆栈中。</p>
+                <p>对于本次实验，execlp的参数不是用户输入的，而是写死的。但这几个参数仍然是在menu的堆栈中。</p>
+                <img src="img/28.jpg" alt="">
+                <p>还记得实验四中嵌入汇编代码调用库函数是如何传参数的吗？</p>
+                <p>对！通过寄存器。我猜想，这里在库函数调用的时候传递参数也是要通过寄存器的。这个任务应该是编译器完成的。</p>
+                <img src="img/29.jpg" alt="">
+                <p>我们知道向系统调用传递6个参数，分别依次由%ebx，%ecx，%edx，%esi，%edi和%ebp这个6个寄存器完成。而在save_all中传入内核堆栈的顺序都是和上述寄存器顺序一样的。我认为参数在这里传入了内核态。</p>
+                <img src="img/30.jpg" alt="">
+                <p>而且在save_all之后，发生系统调用，也验证了我的想法。对于本次实验参数算是传给了sys_execve()。</p>
+                <img src="img/31.jpg" alt="">
+                <p>在do_execve_common()中拷贝了参数到bprm。其中bprm中有个子元素page用来存放参数。</p>
+                <img src="img/33.jpg" alt="">
+                <p>在load_elf_binary()中，将bprm的page拷贝到用户态的新的地址空间</p>
+                <img src="img/34.jpg" alt="">
+                <p>接下来将elf文件映射进内存，修改了eip，esp去执行新进程也就是hello。执行成功的execve是不返回的。下图中，对Exec函数做了一些微小的改变，加了一句输出exec return.这一句不执行，说明了execve不返回。</p>
+                <img src="img/32.jpg" alt="">
+                <p>
+                    <br>
+                    <br>
+                </p>
+                <p>-----------------------------------------------我是分割线------------------------------------------------------</p>
+                <p>
+                    <br>
+                </p>
+                <h4>跟踪execlp的调用</h4>
+                <p>启动调试，设置断点sys_execve</p>
+                <img src="img/7.jpg" alt="">
+                <p>发现sys_execve调用了do_execve</p>
+                <img src="img/8.jpg" alt="">
+                <p>do_execve,再调用do_execve_common。这个函数不知道为什么通过加断点却停不下来。只能单步调试。</p>
+                <img src="img/9.jpg" alt="">
+                <p>看do_execve_common的参数表看得出来，这个函数会把函数参数和系统环境传进来进行相应的处理。</p>
+                <img src="img/12.jpg" alt="">
+                <p>然后调用exec_binprm来执行相应的程序。不过这个函数也停不下来。</p>
+                <img src="img/13.jpg" alt="">
+                <p>查看源代码吧。调用了search_binary_handler</p>
+                <img src="img/15.jpg" alt="">
+                <p>search_binary_handler这个函数倒是可跟踪。这个函数会调用各种不同的格式来识别相应的文件，直到识别为止，比如linux中可执行文件为ELF，它就会识别出elf文件。</p>
+                <img src="img/14.jpg" alt="">
+                <p>我们先看看bprm到底是什么，见到这个好多次了。</p>
+                <img src="img/20.jpg" alt="">
+                <p>可执行文件的识别被组织成了一个链表，每一种文件格式被定义为一个结构linux_binprm。该结构体在include/linux/binfmts.h文件中定义</p>
+                <img src="img/21.jpg" alt="">
+                <p>由于Linux是elf格式，故会执行对应的load_elf_binary</p>
+                <img src="img/16.jpg" alt="">
+                <p>load_elf_binary函数里面有一个函数start_thread</p>
+                <img src="img/17.jpg" alt="">
+                <p>start_thread，这个函数会复制内核堆栈，同时会设置新的进程的执行位置，即会设置新的eip，使eip指向新程序的入口位置。</p>
+                <img src="img/18.jpg" alt="">
+                <p>进入start_thread后,可以看到new_ip</p>
+                <img src="img/22.jpg" alt="">
+                <p>在改变regs前后查看regs</p>
+                <img src="img/23.jpg" alt="">
+                <p>ip变成新的了。</p>
+                <img src="img/24.jpg" alt="">
+                <p>这个ip是什么呢？就是要加载的hello的入口地址。</p>
+                <p>那么问题来了,这篇博客中第四张图的入口不是0x8048320吗？这里咋变成0x8048e08了呢？</p>
+                <p>主要是因为menu文件中的这个hello是静态链接，第四张图中的是动态链接。查看第二张图中的hello.static得到的也是0x8048e08</p>
+                <p>如果是静态链接的elf文件，那么直接加载文件即可。如果是动态链接的可执行文件，那么需要加载的是动态链接器。</p>
+                <p>问题又来了，我咋知道你是静态还是动态的？请看下文load_elf_binary中的分析。</p>
+                <img src="img/25.jpg" alt="">
+                <p>再执行就进行了输出。</p>
+                <img src="img/19.jpg" alt="">
+            </div>
+            <div class="">
+                <h3>代码分析</h3>
+                <div class="code">
+                    <!--Ctrl+Shift+{折叠选中代码段-->
+                    <h4>do_exec</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						int do_execve(struct filename *filename,
+						    const char __user *const __user *__argv,
+						    const char __user *const __user *__envp)
+						{
+						    return do_execve_common(filename, argv, envp);
+						}
+
+
+						static int do_execve_common(struct filename *filename,
+						                struct user_arg_ptr argv,
+						                struct user_arg_ptr envp)
+						{
+						    // 检查进程的数量限制
+
+						    // 选择最小负载的CPU，以执行新程序
+						    sched_exec();
+
+						    // 填充 linux_binprm结构体
+						    retval = prepare_binprm(bprm);
+
+						    // 拷贝文件名、命令行参数、环境变量
+						    retval = copy_strings_kernel(1, &bprm->filename, bprm);
+						    retval = copy_strings(bprm->envc, envp, bprm);
+						    retval = copy_strings(bprm->argc, argv, bprm);
+
+						    // 调用exec_binprm,保存当前的pid
+						    retval = exec_binprm(bprm);
+
+						    // exec执行成功
+
+						}
+
+						static int exec_binprm(struct linux_binprm *bprm)
+						{
+						    // 扫描formats链表，根据不同的文本格式，选择不同的load函数
+						    ret = search_binary_handler(bprm);
+						    // ...
+						    return ret;
+						}
+                    </pre>
+                    <p>
+                    </p>
+                    <h4>search_binary_handler</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						int search_binary_handler(struct linux_binprm *bprm)
+						{
+						    // 遍历formats链表，记录着内核目前支持的文件格式
+						    list_for_each_entry(fmt, &formats, lh) {
+						        // 应用每种格式的load_binary方法
+						        retval = fmt->load_binary(bprm);
+						        // ...
+						    }
+						    return retval;
+						}
+                    </pre>
+                    <p></p>
+                    <h4>linux_binprm的结构体定义load the binary formats</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						struct linux_binfmt {
+						    struct list_head lh;
+						    struct module *module;
+						    int (*load_binary)(struct linux_binprm *);
+						    //load_binary本质上是一个函数指针
+							//retval = fmt->load_binary(bprm)，对应了不同的函数调用。
+						    int (*load_shlib)(struct file *);//加载共享库
+						    int (*core_dump)(struct coredump_params *cprm);
+						    unsigned long min_coredump; /* minimal dump size */
+						};
+                    </pre>
+                    <p></p>
+                    <h4>在/fs/binfmt_elf.c中elf_format </h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						static struct linux_binfmt elf_format = {
+				            .module     = THIS_MODULE,
+				            .load_binary    = load_elf_binary,//执行的这个函数
+				            .load_shlib = load_elf_library,
+				            .core_dump  = elf_core_dump,
+				            .min_coredump   = ELF_EXEC_PAGESIZE,
+				        };
+                    </pre>
+                    <p></p>
+                    <h4>我们追踪的是elf文件，所以接下来我们查看load_elf_binary</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						static int load_elf_binary(struct linux_binprm *bprm)
+						{
+						    // ....
+						    struct pt_regs *regs = current_pt_regs();  // 获取当前进程的寄存器存储位置
+
+						    // 获取elf前128个字节
+						    loc->elf_ex = *((struct elfhdr *)bprm->buf);
+
+						    // 检查魔数是否匹配
+						    if (memcmp(loc->elf_ex.e_ident, ELFMAG, SELFMAG) != 0)
+						        goto out;
+
+						    // 如果既不是可执行文件也不是动态链接程序，就错误退出
+						    if (loc->elf_ex.e_type != ET_EXEC && loc->elf_ex.e_type != ET_DYN)
+						        // 
+						    // 读取所有的头部信息
+						    // 读入程序的头部分
+						    retval = kernel_read(bprm->file, loc->elf_ex.e_phoff,
+						                 (char *)elf_phdata, size);
+
+						    // 遍历elf的程序头
+						    for (i = 0; i < loc->elf_ex.e_phnum; i++) {
+
+						        // 如果存在解释器头部
+						        if (elf_ppnt->p_type == PT_INTERP) {
+						            // 
+						            // 读入解释器名
+						            retval = kernel_read(bprm->file, elf_ppnt->p_offset,
+						                         elf_interpreter,
+						                         elf_ppnt->p_filesz);
+
+						            // 打开解释器文件
+						            interpreter = open_exec(elf_interpreter);
+
+						            // 读入解释器文件的头部
+						            retval = kernel_read(interpreter, 0, bprm->buf,
+						                         BINPRM_BUF_SIZE);
+
+						            // 获取解释器的头部
+						            loc->interp_elf_ex = *((struct elfhdr *)bprm->buf);
+						            break;
+						        }
+						        elf_ppnt++;
+						    }
+
+						    // 释放空间、删除信号、关闭带有CLOSE_ON_EXEC标志的文件
+						    retval = flush_old_exec(bprm);
+
+
+						    setup_new_exec(bprm);
+
+						    // 为进程分配用户态堆栈，并塞入参数和环境变量
+						    retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
+						                 executable_stack);
+						    current->mm->start_stack = bprm->p;
+
+						    // 将elf文件映射进内存
+						    for(i = 0, elf_ppnt = elf_phdata;
+						        i < loc->elf_ex.e_phnum; i++, elf_ppnt++) {
+
+						        if (unlikely (elf_brk > elf_bss)) {
+						            unsigned long nbyte;
+
+						            // 生成BSS
+						            retval = set_brk(elf_bss + load_bias,
+						                     elf_brk + load_bias);
+						            // ...
+						        }
+
+						        // 可执行程序
+						        if (loc->elf_ex.e_type == ET_EXEC || load_addr_set) {
+						            elf_flags |= MAP_FIXED;
+						        } else if (loc->elf_ex.e_type == ET_DYN) { // 动态链接库
+						            // ...
+						        }
+
+						        // 创建一个新线性区对可执行文件的数据段进行映射
+						        error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
+						                elf_prot, elf_flags, 0);
+
+						        }
+
+						    }
+
+						    // 加上偏移量
+						    loc->elf_ex.e_entry += load_bias;
+						    // ....
+
+
+						    // 创建一个新的匿名线性区，来映射程序的bss段
+						    retval = set_brk(elf_bss, elf_brk);
+
+						    // 如果该程序需要动态链接,则elf_interpreter指针不为空,
+						    //并指向对应的 ld文件.内核则加载此文件,由该文件进行动态链接,并最终跳入程序头文件中制定的入口点
+						    if (elf_interpreter) {
+						        unsigned long interp_map_addr = 0;
+
+						        // 调用一个装入动态链接程序的函数 此时elf_entry指向一个动态链接程序的入口
+						        elf_entry = load_elf_interp(&loc->interp_elf_ex,
+						                        interpreter,
+						                        &interp_map_addr,
+						                        load_bias);
+						        // ...
+						    } else {
+						        // elf_entry是可执行程序的入口
+						        elf_entry = loc->elf_ex.e_entry;
+						        // ....
+						    }
+
+						    // 修改保存在内核堆栈，但属于用户态的eip和esp
+						    start_thread(regs, elf_entry, bprm->p);
+						    retval = 0;
+						    // 
+						}
+                    </pre>
+                    <p>可以看到，当这个文件需要用elf_interpreter的话，也就是说它需要依赖动态链接器来解释这个ELF文件，那么它就需要加载load_elf_interp，实际上是加载动态连接器ld，那么这时候Entry point address，也就是说在返回到用户态的时候，它返回的就不是这个可执行程序文件规定的起点，它返回的是动态连接器的程序入口，动态连接器负责解释当前的可执行文件，看它里面依赖哪些动态链接库，然后把那些动态链接库一个一个加载进来，加载进来之后再解释加载进来的动态链接库，看它这个动态链接库还依赖哪些文件，这样就有一个叫广度遍历的方法（即动态链接库的装载过程是一个图的遍历），把所有的动态链接库都装载起来，装载起来之后ld再负责把CPU的控制权移交给可执行程序头部规定的起点位置。</p>
+                    <h4>还有些小问题。关于动态链接的。</h4>
+                    <img src="img/26.jpg" alt="">
+                    <p>共享库在程序的链接时候并不像静态库那样在拷贝使用函数的代码，而只是作些标记。然后在程序开始启动运行的时候，动态地加载所需模块。</p>
+                    <p>动态加载共享库(dynamically loaded (DL) libraries)是指在程序运行过程中可以加载的函数库。而不是像共享库一样在程序启动的时候加载。DL对于实现插件和模块非常有用，因为他们可以让程序在允许时等待插件的加载。在Linux中，动态库的文件格式跟共享库没有区别。</p>
+                    <p>有专门的一组API用于完成操作动态库</p>
+                    <p>函数原型：void *dlopen(const char *libname,int flag);功能描述：表示将库装载到内存并返回一个句柄给调用进程。如果要装载的库依赖于其它库，必须首先装载依赖库。
+                    </p>
+                    <p>函数原型：char *dlerror(void);功能描述：dlerror可以获得最近一次dlopen,dlsym或dlclose操作的错误信息，返回NULL表示无错误。dlerror在返回错误信息的同时，也会清除错误信息。</p>
+                    <p>函数原型：void *dlsym(void *handle,const char *symbol);功能描述：handle是由dlopen打开动态链接库后返回的指针，symbol就是要求获取的函数的名称，函数返回值是void*,指向函数的地址，供调用使用</p>
+                    <p>函数原型：int dlclose(void *);功能描述：将已经装载的库句柄减一，如果句柄减至零，则该库会被卸载。如果存在析构函数，则在dlclose之后，析构函数会被调用。</p>
+                    <p>有了这些知识，分析一下运行结果。</p>
+                    <img src="img/27.jpg" alt="">
+                    <p>在编译的时候，就对可执行文件中做了共享库libshlibexample.so的标记。装载后，运行可以直接调用里面的SharedLibApi函数。</p>
+                    <p>但是动态加载共享库libdllibexample.so不同，没有任何标记。只能先打来这个库，此时才把库装载到内存中，返回给进程一个句柄。再根据这个句柄找到库中的DynamicalLoadingLibApi函数，赋予函数指针func，最后调用func()。关闭库。</p>
+                    <h3>总结</h3>
+                    <p>这次内容是真多呀。做了好几天。也算是把一些疑惑有了大致的思路。</p>
+                    <p>求5分好评。</p>
+                </div>
+            </div>
+        </section>
+        <section id="reference">
+            <h2>参考资料</h2>
+            <p>
+                <a href="http://www.jianshu.com/p/f2babbdb4922">可执行程序的装载</a>
+            </p>
+            <p>
+                <a href="http://www.cnblogs.com/paperfish/p/5361211.html">实验作业：Linux内核如何装载和启动一个可执行程序</a>
+            </p>
+            <p>
+                <a href="http://ju.outofmemory.cn/entry/144917">Linux内核如何装载和启动一个可执行程序</a>
+            </p>
+            <p><a href="http://www.jianshu.com/p/dee889469bdd">Linux内核如何启动并装载一个可执行程序</a></p>
+            <p><a href="http://blog.163.com/tianhail@126/blog/static/1403959152010314549832/">pt_regs/linux_binprm 结构体</a></p>
+            <p><a href="http://blog.csdn.net/since20140504/article/details/45057619"> 静态库、共享库和动态加载库</a></p>
+            <p><a href="http://blog.csdn.net/dog250/article/details/5303629">linux程序的命令行参数</a></p>
+        </section>
+    </content>
+    <footer>
+        <ul class="share-group">
+            <li><i class="fa fa-weixin fa-2x"></i>微信
+                <br>xue-zhaojiang</li>
+            <li><i class="fa fa-qq fa-2x"></i>QQ
+                <br>602431866</li>
+            <li><i class="fa fa-weibo fa-2x"></i>新浪微博
+                <br>小皇叔666</li>
+            <li><i class="fa fa-github fa-2x"></i>GitHub
+                <br>xuezhaojiang</li>
+        </ul>
+    </footer>
+</body>

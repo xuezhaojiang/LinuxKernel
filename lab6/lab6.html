@@ -172,6 +172,7 @@
 						 
 						        // 取出task结构体内的pid
 						        pid = get_task_pid(p, PIDTYPE_PID);
+						        //父进程读取子进程的pid作为fork的返回值
 						        nr = pid_vnr(pid);
 						 
 						        if (clone_flags & CLONE_PARENT_SETTID)
@@ -221,7 +222,7 @@
 						    int retval;
 						    struct task_struct *p;
 						 
-						    // 分配一个新的task_struct，此时的p与当前进程的task仅仅是stack地址不同
+						    // 分配一个新的task_struct，作为子进程的进程描述符。此时的p与当前进程的task仅仅是stack地址不同
 						    p = dup_task_struct(current);
 						 
 						    // 检查该用户的进程数是否超过限制

@@ -1,0 +1,68 @@
+footer {
+    background: rgba(3, 22, 52, 0.9);
+    color: #fff;
+    min-height: 200px;
+    text-align: center;
+}
+
+ul.share-group {
+    display: block;
+    width: 1080px;
+    margin: 0 auto;
+    padding: 50px;
+}
+
+.share-group li {
+    display: inline-block;
+    padding: 10px;
+}
+
+h1 {
+    text-align: center;
+}
+
+h2 {
+    margin-left: 2em;
+}
+
+h3 {
+    color: red;
+    text-align: left;
+    font-size: 16pt;
+    margin-left: 2em;
+}
+
+h4 {
+    color: blue;
+    text-align: left;
+    font-size: 12pt;
+    margin-left: 4em;
+}
+
+div {
+    margin-left: 2em;
+    text-indent: 2em;
+}
+
+p {
+    margin-left: 4em;
+    border: 0;
+    padding-left: 2em;
+    text-align: left;
+    text-indent: 2em;
+}
+
+table {
+    margin-left: 8em;
+}
+
+img {
+    clear: both;
+    display: block;
+    max-width: 1100px;
+    margin-left: 8em;
+}
+
+embed {
+    margin-left: 12em;
+}
