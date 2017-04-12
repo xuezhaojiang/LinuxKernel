@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+
+<head lang="en">
+    <meta charset="utf-8">
+    <title>linux core lab8</title>
+    <!-- <link rel="stylesheet" href="css/normalize.css" type="text/css"> -->
+    <link rel="stylesheet" href="css/main.css" type="text/css">
+    <link type="text/css" rel="stylesheet" href="css/shCore.css" />
+    <link type="text/css" rel="stylesheet" href="css/shCoreDefault.css" />
+    <link type="text/css" rel="stylesheet" href="css/shThemeDefault.css">
+    <script type="text/javascript" src="js/shCore.js"></script>
+    <script type="text/javascript" src="js/shBrushCpp.js"></script>
+    <link href="https://cdn.bootcss.com/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet">
+    <script type="text/javascript">
+    SyntaxHighlighter.all();
+    </script>
+</head>
+
+<body>
+    <header>
+        <title>进程调度与进程切换的过程</title>
+        <h1>进程调度与进程切换的过程</h1>
+        <p>薛兆江 + 原创作品转载请注明出处 + <a href="http://mooc.study.163.com/course/USTC-1000029000">《Linux内核分析》MOOC课程</a>http://mooc.study.163.com/course/USTC-1000029000</p>
+    </header>
+    <content>
+        <section id="target">
+            <h2>学习目标</h2>
+            <p>理解Linux系统中进程调度的时机，可以在内核代码中搜索schedule()函数，看都是哪里调用了schedule()</p>
+            <p>使用gdb跟踪分析一个schedule()函数 ，验证您对Linux系统进程调度与进程切换过程的理解</p>
+            <p>特别关注并仔细分析switch_to中的汇编代码，理解进程上下文的切换机制，以及与中断上下文切换的关系；</p>
+        </section>
+        <section id="abc">
+            <h2>基础知识</h2>
+            <div>
+                <p>下面的内容中，有一些基础知识和这次实验联系不太大，但也写在了这里，加深理解。</p>
+                <h3>异常</h3>
+                <p>系统必须能对系统状态的变化做出反应，现代系统通过使控制流发生突变对这些情况做出反应。我们称这种突变为异常控制流( Exceptional Control Flow,ECF)异常控制流发生在系统的各个层次。</p>
+                <p>异常是异常控制流的一种，一部分由硬件实现，一部分由操作系统实现。异常(exception)就是控制流的突变，用来响应处理器状态的某些变化。在处理器中，状态被编码成不同的位和信号。状态变化称为事件（event）。在任何情况下，当处理器检测到有事件发生时，它就会通过一张叫做异常表（exception table）的跳转表，进行一个间接过程调用（异常）到一个专门设计用来处理这类事件的操作系统子程序（异常处理程序(exception handler)）。
+                </p>
+                <h4>异常处理</h4>
+                <p>系统中可能的每种类型的异常，都为分配了一个非负的异常号(exception number)。包括：被零除、缺页、存储器访问违例、断点、算术溢出，系统调用、外都I/O设备的信号。</p>
+                <p>在任何情况下，当处理器检测到有<strong>事件</strong>发生时，处理器会执行间接过程调用：</p>
+                <ol>
+                    <li>在跳转至异常处理程序之前，处理器将返回地址和一些额外的处理器状态压入栈中；</li>
+                    <li>根据异常号 k， 通过异常表，转到相应的异常处理程序；</li>
+                    <li>执行“从中断返回”的指令，可选的返回到被中断的程序，将状态弹回到处理器的控制和数据寄存器中。</li>
+                </ol>
+                <h4>异常的类别</h4>
+                <p>异常可以分为四类： 中断（interrupt）、陷阱（trap）、故障（fault）和终止（abort）。其中，<strong>中断</strong>是异步的。 I/O 设备向处理器芯片上的一个引脚发信号，并将异常号放到系统总线上，触发中断。在当前指令执行完成之后，处理器检测到中断引脚的电压变高了，就从系统总线读取异常号，然后执行间接过程调用。当处理程序返回时，将控制返回给下一条指令。而陷阱、故障和终止都是同步的。</p>
+                <p><strong>中断</strong>是异步发生的，硬件中断不由任何指令造成，所以说是异步的。硬件中断的异常处理程序称为<strong>中断处理程序</strong>。</p>
+                <p><strong>陷阱</strong>是有意的异常，陷阱最重要的用途是在用户程序和内核之间提供<strong>系统调用</strong>。用户程序执行“syscal n”指令，请求服务 n，syscall 指令触发陷阱。异常处理程序对参数解码，并调用适当的内核程序。系统调用运行在内核模式中。经典的示例是读文件、创建新的进程、加载一个新的程序和终止当前进程</p>
+                <p><strong>故障</strong>是由错误情况引起的，它可能能够被故障处理程序修正。当故障发生时，处理器将控制转移给故障处理程序。如果故障处理程序能够修正这个错误情况，就将控制返回给当前指令，否则，返回到内核的 abort 例程。一个经典的故障示例是缺页异常。</p>
+                <p><strong>终止</strong>是不可恢复的致命错误造成的结果，通常是一些硬件错误，如 DRAM 和 SRAM 位被损坏时发生的奇偶错误。终止处理程序将控制返回给一个 abort 例程，终止应用程序。</p>
+                <h4>Linux/IA32 系统中的异常</h4>
+                <p>在 IA32 系统上，系统调用是通过一条称为 int n 的陷阱指令来完成的，其中 n 可能是异常表 256 个条目中的任何一个。在历史上，系统调用是通过异常 128（0x80）。</p>
+                <h3>进程</h3>
+                <p>进程是一个执行中程序的实例。系统中每个程序都是运行在某个进程的上下文(context)中的。上下文由程序正确运行所需的状态组成，包括程序的存放在存储器中的代码和数据、栈、通用目的寄存器的内容、程序计数器、环境变量和打开文件描述符的集合。</p>
+                <p>每次用户在shell中输入一个可执行目标文件的名字，并运行程序时，shell会创建一个新的进程，然后在新进程的上下文中运行可执行目标文件。</p>
+                <p>进程给应用程序提供了两个关键抽象：</p>
+                <ol>
+                    <li>一个独立的逻辑控制流，提供程序独占处理器的假象。</li>
+                    <li>一个私有的地址空间，提供程序独占存储器系统的假象。</li>
+                </ol>
+                <h4>逻辑控制流</h4>
+                <p>程序执行的一系列PC（程序计数器）值唯一地对应于包含在程序的可执行目标文件中的指令或包含在运行时动态链接的共享库中的指令，这个PC值的序列称为逻辑控制流。</p>
+                <img alt="" src="img/1.jpg" />
+                <p>进程轮流使用处理器，每个进程执行它的流的一部分，然后被抢占，其他进程开始执行。程序运行在进程的上下文中，因此像是在独占地使用处理器。</p>
+                <p>逻辑流是相互独立的，进程互不影响。可以通过进程间通信（IPC）机制来实现进程间交互。</p>
+                <p>逻辑流在时间上和其他逻辑流重叠的进程称为并发进程，这两个进程称为并发运行。如A和B、A和C，而B和C不是并发运行的。</p>
+                <p>进程执行控制流的一部分的时间段称为时间片，进程和其他进程轮换运行称为多任务，也称时间分片。</p>
+                <h4>私有地址空间</h4>
+                <p>进程为每个程序提供私有地址空间，和这个空间中某地址相关联的存储器字节不能被其他进程读写。和私有地址空间关联的存储器内容一般不同，但空间有相同的结构。</p>
+                <img src="img/3.jpg" alt="">
+                <p>地址空间的顶部是保留给内核的，包含内核在代表进程执行指令时（比如：系统调用）使用的代码数据和栈。</p>
+                <h4>用户模式和内核模式</h4>
+                <p>处理器需要提供一种机制，限制一个应用可以执行的指令以及可访问的地址空间范围来实现进程抽象，处理器通常是用某个控制寄存器的一个模式位（mode bit）来提供这种机制，该寄存器描述了进程当前享有的特权。设置了模式位时，进程运行在内核模式中，进程可以执行任何指令和访问任何存储器位置。没设置模式位时，进程运行在用户模式中，进程不允许执行特权指令（privileged instruction）和访问地址空间中内核区内的代码和数据。用户程序必须通过系统调用接口间接地访问内核代码和数据。</p>
+                <p>运行应用程序代码的进程初始是在用户模式中的，进程从用户模式变为内核模式的唯一方法是通过中断、故障或陷入系统调用这样的异常。</p>
+                <p>Linux有一种
+                    <tt>/proc</tt> 文件系统，它运行用户模式进程访问内核数据结构的内容。/proc文件系统将许多内核数据结构的内容输出为一个用户可以读的文件文本的层次结构。比如：系统属性、cpu类型、系统总线和设备信息。</p>
+                <h4>上下文切换</h4>
+                <p>操作系统内核使用一种称为上下文切换（context switch）的较高层形式的异常控制流来实现多任务。上下文切换机制建立在低级异常机制上。</p>
+                <p>内核为每个进程维持一个上下文，上下文就是内核重新启动一个被抢占进程所需的状态。包括通用目的寄存器、浮点寄存器、程序计数器、用户栈、状态寄存器、内核栈和各种内核数据结构（页表、进程表和文件表等）的值。进程上下文包含了进程执行需要的所有信息，包括: 用户地址空间：包括程序代码，数据，用户堆栈等；控制信息：进程描述符，内核堆栈等；硬件上下文（注意中断也要保存硬件上下文只是保存的方法不同）可以看作就是硬件传递过来的这些参数和内核需要保存的一些其他环境。
+                </p>
+                <p>当进程执行的某些时刻，内核可以决定抢占当前进程，并重新开始一个先前被抢占的进程，这称为调度（schedule），由内核中的调度器代码处理。当内核选择一个新的进程运行时，我们称内核调度了这个进程。内核使用上下文切换机制来将控制转移到新进程。上下文切换保存当前进程的上下文，恢复先前被抢占进程保存的上下文，将控制传递给新恢复的进程。</p>
+                <p>系统调用和中断可以引发上下文切换。</p>
+                <p>挂起正在CPU上执行的进程，与中断时保存现场是不同的，中断前后是在同一个进程上下文中，只是由用户态转向内核态执行。</p>
+                <h4>系统调用</h4>
+                <p>在Linux中，可以使用
+                    <tt>man syscalls</tt> 查看全部系统调用的列表。系统级函数遇到错误时，通常返回-1，并设置全局变量
+                    <tt>errno</tt> 。</p>
+                <p>
+                    <tt>strace</tt> 命令可以打印程序和它的子进程调用的每个系统调用的轨迹。</p>
+                <h4>进程控制</h4>
+                <p>进程有三种状态：</p>
+                <ol class="simple">
+                    <li>运行。进程在CPU上执行，或等待被执行（会被调度）。</li>
+                    <li>停止。进程被挂起（不会被调度）。收到
+                        <tt>SIGSTOP</tt> 、
+                        <tt>SIGTSTP</tt> 、
+                        <tt>SIDTTIN</tt> 、
+                        <tt>SIGTTOU</tt> 信号，进程停止，收到
+                        <tt>SIGCONT</tt> 信号，进程再次开始运行。</li>
+                    <li>终止。进程永远停止。原因可能是：收到终止进程的信号，从主程序返回，调用
+                        <tt>exit</tt> 函数。</li>
+                </ol>
+                <p>创建新进程可以使用
+                    <tt>fork</tt> 函数。新创建的子进程和父进程几乎相同，它获得父进程用户级虚拟地址空间和文件描述符的副本，主要区别是它们的PID不同。
+                    <tt>fork</tt> 函数调用一次，返回两次；父子进程是并发运行的，不能假设它们的执行顺序；两个进程的初始地址空间相同，但是是相互独立的；它们还共享打开的文件。</p>
+                <p>进程终止时，并不会被立即清除，而是等待父进程回收，称为僵死进程。父进程回收终止的子进程时，内核将子进程退出状态传给父进程，然后抛弃该进程。如果回收前父进程已经终止，那么僵死进程由
+                    <tt>init</tt> 进程回收。</p>
+                <p>回收子进程可以用
+                    <tt>wait</tt> 和
+                    <tt>waitpid</tt> 等函数。</p>
+                <p>内核调用
+                    <tt>execve</tt> 函数在当前进程的上下文中加载并运行一个新程序。
+                    <tt>execve</tt> 加载
+                    <tt>filename</tt> 后，调用启动代码，启动代码准备栈，将控制传给新程序的主函数
+                    <tt>int main(int argc, char *argv[],char *envp[])</tt> 。下面是用户栈的典型组织：</p>
+                <img alt="" src="img/2.jpg" />
+                <p>fork函数在新的子进程中运行相同的程序，新的子进程时父进程的复制品。execve函数在当前进程的上下文中加载一个新的程序，它会覆盖当前进程的地址空间，但并没有创建一个新进程，新的程序仍然有相同的PID，并且继承了调用execve函数时已打开的所有文件描述符。</p>
+                <h4>内核抢占基础知识</h4>
+                <ol>
+                    <li>内核抢占概念:
+                        <br> 当进程位于内核空间，有一个更高优先级的任务出现时，如果该内核支持抢占的话，则可以将当前任务挂起，执行更高优先级的任务！
+                    </li>
+                    <li>用户抢占的概念:
+                        <br>内核即将返回用户空间的时候，如果need resched标志被设置，会导致schedule()被调用，此时就会发生用户抢占。内核无论是在从中断处理程序还是在系统调用后返回，都会检查need resched标志。如果它被设置了，那么，内核会选择一个其他(更合适的)进程投入运行。</li>
+                    <li>内核抢占好处:
+                        <br>这是实时系统所要求的。试想一下，如果硬件中断开启了一个实时进程，如果内核不支持抢占的话，被开启的实时进程就要等到当前进程执行完毕才能被调度，这就带来了延时，对实时性不好！如果内核支持抢占的话，就可以将当前进程挂起，来执行实时进程，这样对实时性有利！
+                    </li>
+                    <li>什么情况下不能抢占内核:
+                        <br>（1）内核正进行中断处理
+                        <br>（2）内核正在进行中断上下文的Bottom Half(中断的底半部)处理
+                        <br>（3）内核的代码段正持有spinlock自旋锁、writelock/readlock读写锁等锁，处干这些锁的保护状态中。
+                        <br>（4）内核正在执行调度程序Scheduler，这种情况正对应我们的schedule函数分析！！！
+                        <br>（5）内核正在对每个CPU“私有”的数据结构操作
+                        <br>为保证Linux内核在以上情况下不会被抢占，抢占式内核使用了一个变量preempt_count，称为内核抢占锁。这一变量被设置在进程的PCB结构task_struct中。每当内核要进入以上几种状态时，变量preempt_ count就加1，指示内核不允许抢占。每当内核从以上几种状态退出时，变量preempt_ count就减1，同时进行可抢占的判断与调度。
+                    </li>
+                </ol>
+            </div>
+        </section>
+        <section id="experiment">
+            <h2>实验部分</h2>
+            <div id="实验步骤">
+                <h3>实验步骤</h3>
+                <p>schedule()函数选择一个新的进程来运行，并调用context_switch进行上下文的切换，这个宏调用switch_to来进行关键上下文切换</p>
+                <p>next = pick_next_task(rq, prev);//进程调度算法都封装这个函数内部</p>
+                <p>context_switch(rq, prev, next);//进程上下文切换</p>
+                <p>switch_to利用了prev和next两个参数：prev指向当前进程，next指向被调度的进程。使得当前进程的内核堆栈切换为下一个要执行进程的内核堆栈；然后切换到下一个进程的EIP。</p>
+                <p></p>
+                <p>switch_to时请注意：这是一个宏，不是函数，它的参数prev, next, last不是值拷贝，而是它的调用者context_switch()的局部变量。局部变量是通过%ebp寄存器来索引的。</p>
+                <p>schedule函数的特殊之处就在于，它的代码看上去分成两部分，上部分当前进程执行，下部分切换后的进程执行。看似不合理，原理就是对于一个进程来说，它仍然是执行完整的schedule，只不过它执行上半部分之后等下个进程执行下半部分切换回来之后，在执行自己的下半部分。</p>
+                <h4>可执行文件的创建</h4>
+                <p>-E参数就是生成预处理后的文件;</p>
+                <img src="img/3.jpg" alt="">
+                <p>
+                    <br>
+                    <br>
+                </p>
+                <p>-----------------------------------------------我是分割线------------------------------------------------------</p>
+                <p>
+                    <br>
+                </p>
+            </div>
+            <div class="">
+                <h3>代码分析</h3>
+                <div class="code">
+                    <!--Ctrl+Shift+{折叠选中代码段-->
+                    <h4>/kernel/sched/core.c  schedule</h4>
+                    <pre name="code" class="brush:cpp;first-line:2860;collapse: false">
+						asmlinkage __visible void __sched schedule(void)
+						{
+						        struct task_struct *tsk = current;//来获取当前进程
+						 
+						        sched_submit_work(tsk);//避免死锁
+						        __schedule();//处理切换过程
+						}
+                    </pre>
+                    <p>
+                    </p>
+                    <h4>/kernel/sched/core.c  __schedule</h4>
+                    <pre name="code" class="brush:cpp;first-line:2765;collapse: false">
+						static void __sched __schedule(void)
+						{
+						    struct task_struct *prev, *next;
+						    unsigned long *switch_count;
+						    struct rq *rq;
+						    int cpu;
+
+						need_resched:
+						    preempt_disable();   //关闭内核抢占
+						    cpu = smp_processor_id();
+						    rq = cpu_rq(cpu);   //找到当前cpu上的就绪队列rq，跟当前进程相关的runqueue的信息被保存在rq中
+						    rcu_note_context_switch(cpu);
+						    prev = rq->curr;   //将正在运行的进程curr保存到prev中
+
+						    schedule_debug(prev);//如果禁止内核抢占，而又调用了cond_resched就会出错，这里就是用来捕获该错误的
+
+						    if (sched_feat(HRTICK))
+						        hrtick_clear(rq);
+
+							smp_mb__before_spinlock();
+						    raw_spin_lock_irq(&rq->lock);
+
+						    switch_count = &prev->nivcsw;//切换次数记录, 默认认为非主动调度计数
+						    
+						    if (prev->state && !(preempt_count() & PREEMPT_ACTIVE))//如果内核态没有被抢占，并且内核抢占有效
+						    {
+						        //如果当前进程有非阻塞等待信号，并且它的状态是TASK_INTERRUPTIBLE
+						        if (unlikely(signal_pending_state(prev->state, prev)))
+						        {
+						            prev->state = TASK_RUNNING; //将当前进程的状态设为：TASK_RUNNING
+						        }
+						        else
+						        {
+						            deactivate_task(rq, prev, DEQUEUE_SLEEP);//将当前进程从runqueue(运行队列)中删除
+						            prev->on_rq = 0;  //标识当前进程不在runqueue中
+
+						          
+						            if (prev->flags & PF_WQ_WORKER)
+						            {
+						                struct task_struct *to_wakeup;
+
+						                to_wakeup = wq_worker_sleeping(prev, cpu);
+						                if (to_wakeup)
+						                    try_to_wake_up_local(to_wakeup);
+						            }
+						        }
+						        switch_count = &prev->nvcsw;
+						    }
+
+						    pre_schedule(rq, prev);
+
+						    if (unlikely(!rq->nr_running))//如果runqueue中没有正在运行的进程
+						        idle_balance(cpu, rq); //就会从其它CPU拉入进程
+
+						    put_prev_task(rq, prev);   //通知调度器，当前进程要被另一个进程取代，做好准备
+						    next = pick_next_task(rq); //从runqueue中选择最适合的进程
+						    clear_tsk_need_resched(prev); //清除当前进程的重调度标识
+						    rq->skip_clock_update = 0;
+						    //当前进程与所选进程是否是同一进程，不属于同一进程才需要切换
+						    if (likely(prev != next))
+						    {
+						        rq->nr_switches++;
+						        rq->curr = next; //所选进程代替当前进程
+						        ++*switch_count;
+
+						        context_switch(rq, prev, next); //负责底层上下文切换
+
+						        cpu = smp_processor_id();
+						        rq = cpu_rq(cpu);
+						    }
+						    else
+						        raw_spin_unlock_irq(&rq->lock);  //如果不需要切换进程，则只需要解锁
+
+						    post_schedule(rq);
+
+						    sched_preempt_enable_no_resched();
+						    if (need_resched())
+						        goto need_resched;
+						}
+                    </pre>
+                    <p>
+                    </p>
+                    <h4>/kernel/sched/core.c  context_switch</h4>
+                    <pre name="code" class="brush:cpp;first-line:2331;collapse: false">
+						/*
+						 * context_switch - switch to the new MM and the new thread's register state.
+						 */
+						static __always_inline struct rq *
+						context_switch(struct rq *rq, struct task_struct *prev,
+						           struct task_struct *next)
+						{
+						    struct mm_struct *mm, *oldmm;
+
+						    /*  完成进程切换的准备工作  */
+						    prepare_task_switch(rq, prev, next);
+
+						    mm = next->mm;
+						    oldmm = prev->active_mm;
+						    /*
+						     * For paravirt, this is coupled with an exit in switch_to to
+						     * combine the page table reload and the switch backend into
+						     * one hypercall.
+						     */
+						    arch_start_context_switch(prev);
+
+						    /*  如果next是内核线程，则线程使用prev所使用的地址空间
+						     *  schedule( )函数把该线程设置为懒惰TLB模式
+						     *  内核线程并不拥有自己的页表集(task_struct->mm = NULL)
+						     *  它使用一个普通进程的页表集
+						     *  不过，没有必要使一个用户态线性地址对应的TLB表项无效
+						     *  因为内核线程不访问用户态地址空间。
+						    */
+						    if (!mm)        /*  内核线程无虚拟地址空间, mm = NULL*/
+						    {
+						        /*  内核线程的active_mm为上一个进程的mm
+						         *  注意此时如果prev也是内核线程,
+						         *  则oldmm为NULL, 即next->active_mm也为NULL  */
+						        next->active_mm = oldmm;
+						        /*  增加mm的引用计数  */
+						        atomic_inc(&oldmm->mm_count);
+						        /*  通知底层体系结构不需要切换虚拟地址空间的用户部分
+						         *  这种加速上下文切换的技术称为惰性TBL  */
+						        enter_lazy_tlb(oldmm, next);
+						    }
+						    else            /*  不是内核线程, 则需要切切换虚拟地址空间  */
+						        switch_mm(oldmm, mm, next);
+
+						    /*  如果prev是内核线程或正在退出的进程
+						     *  就重新设置prev->active_mm
+						     *  然后把指向prev内存描述符的指针保存到运行队列的prev_mm字段中
+						     */
+						    if (!prev->mm)
+						    {
+						        /*  将prev的active_mm赋值和为空  */
+						        prev->active_mm = NULL;
+						        /*  更新运行队列的prev_mm成员  */
+						        rq->prev_mm = oldmm;
+						    }
+						    /*
+						     * Since the runqueue lock will be released by the next
+						     * task (which is an invalid locking op but in the case
+						     * of the scheduler it's an obvious special-case), so we
+						     * do an early lockdep release here:
+						     */
+						    lockdep_unpin_lock(&rq->lock);
+						    spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
+
+						    /* Here we just switch the register state and the stack. 
+						     * 切换进程的执行环境, 包括堆栈和寄存器
+						     * 同时返回上一个执行的程序
+						     * 相当于prev = witch_to(prev, next)  */
+						    switch_to(prev, next, prev);
+
+						    /*  switch_to之后的代码只有在
+						     *  当前进程再次被选择运行(恢复执行)时才会运行
+						     *  而此时当前进程恢复执行时的上一个进程可能跟参数传入时的prev不同
+						     *  甚至可能是系统中任意一个随机的进程
+						     *  因此switch_to通过第三个参数将此进程返回
+						     */
+
+
+						    /*  路障同步, 一般用编译器指令实现
+						     *  确保了switch_to和finish_task_switch的执行顺序
+						     *  不会因为任何可能的优化而改变  */
+						    barrier();  
+
+						    /*  进程切换之后的处理工作  */
+						    finish_task_switch(this_rq(), prev);
+						}
+                    </pre>
+                    <p>
+                    </p>
+                    <h4>arch/x86/include/asm/switch_to.h  switch_to</h4>
+                    <pre name="code" class="brush:cpp;first-line:27;collapse: false">
+						/*
+						 * Saving eflags is important. It switches not only IOPL between tasks,
+						 * it also protects other tasks from NT leaking through sysenter etc.
+						 */
+						#define switch_to(prev, next, last)                                     \
+						do {                                                                    \
+						        /*                                                              \
+						         * Context-switching clobbers all registers, so we clobber      \
+						         * them explicitly, via unused output variables.                \
+						         * (EAX and EBP is not listed because EBP is saved/restored     \
+						         * explicitly for wchan access and EAX is the return value of   \
+						         * __switch_to())                                               \
+						         */                                                             \
+						        unsigned long ebx, ecx, edx, esi, edi;                          \
+						                                                                        \
+						        asm volatile("pushfl\n\t" /* save flags 保存就的ebp、和flags寄存器到旧进程的内核栈中*/   \
+						                     "pushl %%ebp\n\t"          /* save    EBP   */     \
+						                     "movl %%esp,%[prev_sp]\n\t"        /* save ESP  将旧进程esp保存到thread_info结构中 */ \
+						                     "movl %[next_sp],%%esp\n\t"        /* restore ESP 用新进程esp填写esp寄存器，此时内核栈已切换  */ \
+						                     "movl $1f,%[prev_ip]\n\t"  /* save EIP 将该进程恢复执行时的下条地址保存到旧进程的thread中*/     \
+						                     "pushl %[next_ip]\n\t"     /* restore EIP 将新进程的ip值压入到新进程的内核栈中 */     \
+						                     __switch_canary                                    \
+						                     "jmp __switch_to\n"        /* regparm call  */     \
+						                     "1:\t"                                             \
+						                     "popl %%ebp\n\t"           /* restore EBP 该进程执行，恢复ebp寄存器*/     \
+						                     "popfl\n"                  /* restore flags  恢复flags寄存器*/     \
+						                                                                        \
+						                     /* output parameters */                            \
+						                     : [prev_sp] "=m" (prev->thread.sp),                \
+						                       [prev_ip] "=m" (prev->thread.ip),                \
+						                       "=a" (last),                                     \
+						                                                                        \
+						                       /* clobbered output registers: */                \
+						                       "=b" (ebx), "=c" (ecx), "=d" (edx),              \
+						                       "=S" (esi), "=D" (edi)                           \
+						                                                                        \
+						                       __switch_canary_oparam                           \
+						                                                                        \
+						                       /* input parameters: */                          \
+						                     : [next_sp]  "m" (next->thread.sp),                \
+						                       [next_ip]  "m" (next->thread.ip),                \
+						                                                                        \
+						                       /* regparm parameters for __switch_to(): */      \
+						                       [prev]     "a" (prev),                           \
+						                       [next]     "d" (next)                            \
+						                                                                        \
+						                       __switch_canary_iparam                           \
+						                                                                        \
+						                     : /* reloaded segment registers */                 \
+						                        "memory");                                      \
+						} while (0)
+                    </pre>
+                    <p>
+                    </p>
+                    <h4>do_exec</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						
+                    </pre>
+                    <p>
+                    </p>
+                    <h4>do_exec</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+						
+                    </pre>
+                    <p>
+                    </p>
+                </div>
+            </div>
+        </section>
+        <section id="reference">
+            <h2>参考资料</h2>
+            <p>深入理解计算机系统 第8章</p>
+            <p>
+                <a href="http://www.ainesmile.com/os/exception/2016/03/12/exception.html">异常控制流-异常</a>
+            </p>
+            <p>
+                <a href="http://www.yeolar.com/note/2012/03/22/linux-ecf/">Linux系统学习笔记：异常控制流</a>
+            </p>
+            <p>
+                <a href="http://micili.cn/2015-04-26">理解进程调度时机跟踪分析进程调度与进程切换的过程</a>
+            </p>
+            <p><a href="http://www.cnblogs.com/paperfish/p/5380361.html">实验作业：进程调度时机跟踪分析进程调度与进程切换的过程</a></p>
+            <p><a href="http://liu1227787871.blog.163.com/blog/static/20536319720128262124475/">进程调度函数schedule()分析</a></p>
+            <p><a href="http://blog.csdn.net/gatieme/article/details/51872659"> Linux进程上下文切换过程context_switch详解--Linux进程的管理与调度(二十一）</a></p>
+            <p><a href="http://blog.csdn.net/dog250/article/details/5303629">linux程序的命令行参数</a></p>
+        </section>
+    </content>
+    <footer>
+        <ul class="share-group">
+            <li><i class="fa fa-weixin fa-2x"></i>微信
+                <br>xue-zhaojiang</li>
+            <li><i class="fa fa-qq fa-2x"></i>QQ
+                <br>602431866</li>
+            <li><i class="fa fa-weibo fa-2x"></i>新浪微博
+                <br>小皇叔666</li>
+            <li><i class="fa fa-github fa-2x"></i>GitHub
+                <br>xuezhaojiang</li>
+        </ul>
+    </footer>
+</body>
