@@ -118,6 +118,17 @@
                     <tt>int main(int argc, char *argv[],char *envp[])</tt> 。下面是用户栈的典型组织：</p>
                 <img alt="" src="img/2.jpg" />
                 <p>fork函数在新的子进程中运行相同的程序，新的子进程时父进程的复制品。execve函数在当前进程的上下文中加载一个新的程序，它会覆盖当前进程的地址空间，但并没有创建一个新进程，新的程序仍然有相同的PID，并且继承了调用execve函数时已打开的所有文件描述符。</p>
+                <h4>调度触发的时机</h4>
+                <p>调度的触发主要有如下几种情况：</p>
+                <p>1、当前进程（正在CPU上运行的进程）状态变为非可执行状态。</p>
+                <p>进程执行系统调用主动变为非可执行状态。比如执行nanosleep进入睡眠、执行exit退出、等等；</p>
+                <p>进程请求的资源得不到满足而被迫进入睡眠状态。比如执行read系统调用时，磁盘高速缓存里没有所需要的数据，从而睡眠等待磁盘IO；</p>
+                <p>进程响应信号而变为非可执行状态。比如响应SIGSTOP进入暂停状态、响应SIGKILL退出、等等；</p>
+                <p></p>
+                <p>2、抢占。进程运行时，非预期地被剥夺CPU的使用权。这又分两种情况：进程用完了时间片、或出现了优先级更高的进程。</p>
+                <p>优先级更高的进程受正在CPU上运行的进程的影响而被唤醒。如发送信号主动唤醒，或因为释放互斥对象（如释放锁）而被唤醒；</p>
+                <p>内核在响应时钟中断的过程中，发现当前进程的时间片用完；</p>
+                <p>内核在响应中断的过程中，发现优先级更高的进程所等待的外部资源的变为可用，从而将其唤醒。比如CPU收到网卡中断，内核处理该中断，发现某个socket可读，于是唤醒正在等待读这个socket的进程；再比如内核在处理时钟中断的过程中，触发了定时器，从而唤醒对应的正在nanosleep系统调用中睡眠的进程；</p>
                 <h4>内核抢占基础知识</h4>
                 <ol>
                     <li>内核抢占概念:
@@ -143,12 +154,51 @@
             <h2>实验部分</h2>
             <div id="实验步骤">
                 <h3>实验步骤</h3>
-                <p>schedule()函数选择一个新的进程来运行，并调用context_switch进行上下文的切换，这个宏调用switch_to来进行关键上下文切换</p>
+                <p>schedule()函数选择一个新的进程来运行，并调用context_switch进行上下文的切换，这个宏调用switch_to来进行关键上下文切换。__switch_to()主要完成硬件上下文切换，switch_to主要完成内核堆栈切换。</p>
                 <p>next = pick_next_task(rq, prev);//进程调度算法都封装这个函数内部</p>
                 <p>context_switch(rq, prev, next);//进程上下文切换</p>
                 <p>switch_to利用了prev和next两个参数：prev指向当前进程，next指向被调度的进程。使得当前进程的内核堆栈切换为下一个要执行进程的内核堆栈；然后切换到下一个进程的EIP。</p>
                 <p></p>
-                <p>switch_to时请注意：这是一个宏，不是函数，它的参数prev, next, last不是值拷贝，而是它的调用者context_switch()的局部变量。局部变量是通过%ebp寄存器来索引的。</p>
+                <p>switch_to时请注意：这是一个宏，不是函数，它的参数prev, next, last不是值拷贝，而是它的调用者context_switch()的局部变量。局部变量是通过%ebp寄存器来索引的。关于__switch_to()这个函数的调用，并不是通过普通的call来实现，而是直接jmp，函数参数也并不是通过堆栈来传递，而是通过寄存器来传递。</p>
+                <p>switch_to切换主要有以下三部分：</p>
+                <p>&nbsp;</p>
+                <table border="1" cellspacing="0">
+                    <tbody>
+                        <tr>
+                            <td>
+                                <p>进程切换</p>
+                            </td>
+                            <td>
+                                <p>即esp的切换</p>
+                            </td>
+                            <td>
+                                <p>由于从esp可以找到进程的描述符</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <p>硬件上下文切换</p>
+                            </td>
+                            <td>
+                                <p>_switch_to()</p>
+                            </td>
+                            <td>
+                                <p>以前通过x86硬件支持，现在使用软件切换</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <p>堆栈的切换</p>
+                            </td>
+                            <td>
+                                <p>即ebp的切换</p>
+                            </td>
+                            <td>
+                                <p>ebp是栈底指针，它确定了当前变量空间属于哪个进程</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
                 <p>schedule函数的特殊之处就在于，它的代码看上去分成两部分，上部分当前进程执行，下部分切换后的进程执行。看似不合理，原理就是对于一个进程来说，它仍然是执行完整的schedule，只不过它执行上半部分之后等下个进程执行下半部分切换回来之后，在执行自己的下半部分。</p>
                 <h4>可执行文件的创建</h4>
                 <p>-E参数就是生成预处理后的文件;</p>
@@ -161,12 +211,45 @@
                 <p>
                     <br>
                 </p>
+                <p>在schedule函数设置断点</p>
+                <img src="img/4.jpg" alt="">
+                <p>运行到断点</p>
+                <img src="img/5.jpg" alt="">
+                <p>给tsk赋值之后，查看tsk的内容</p>
+                <img src="img/6.jpg" alt="">
+                <p></p>
+                <img src="img/7.jpg" alt="">
+                <p></p>
+                <img src="img/8.jpg" alt="">
+                <p></p>
+                <img src="img/9.jpg" alt="">
+                <p></p>
+                <img src="img/10.jpg" alt="">
+                <p></p>
+                <img src="img/11.jpg" alt="">
+                <p></p>
+                <img src="img/12.jpg" alt="">
+                <p></p>
+                <img src="img/13.jpg" alt="">
+                <p>设置断点__schedule并运行到这里</p>
+                <img src="img/14.jpg" alt="">
+                <p>__schedule调用了context_switch。</p>
+                <p>但无论是b context_switch,还是b kernel/sched/core.c:2834都无法调试到这个调用这里停下来。</p>
+                <img src="img/15.jpg" alt="">
+                <p>无奈之下，重启调试，再context_switch定义处设置断点，万幸这次在这里停下了。</p>
+                <img src="img/15_4.jpg" alt="">
+                <p></p>
+                <img src="img/16.jpg" alt="">
+                <p>context_switch调用了switch_to，在这里加个断点。</p>
+                <img src="img/17.jpg" alt="">
+                <p>停下的地方却是__switch_to函数。加断点b switch_to无效，我在switch_to的定义处设置断点也就是arch/x86/include/asm/switch_to.h:31这里加断点也调试不到这里。后来想明白了，switch_to是个宏定义，在预处理阶段就把宏定义命令转换了，当然调试不到。</p>
+                <img src="img/18.jpg" alt="">
             </div>
             <div class="">
                 <h3>代码分析</h3>
                 <div class="code">
                     <!--Ctrl+Shift+{折叠选中代码段-->
-                    <h4>/kernel/sched/core.c  schedule</h4>
+                    <h4>/kernel/sched/core.c:schedule</h4>
                     <pre name="code" class="brush:cpp;first-line:2860;collapse: false">
 						asmlinkage __visible void __sched schedule(void)
 						{
@@ -178,7 +261,7 @@
                     </pre>
                     <p>
                     </p>
-                    <h4>/kernel/sched/core.c  __schedule</h4>
+                    <h4>/kernel/sched/core.c:__schedule</h4>
                     <pre name="code" class="brush:cpp;first-line:2765;collapse: false">
 						static void __sched __schedule(void)
 						{
@@ -262,7 +345,7 @@
                     </pre>
                     <p>
                     </p>
-                    <h4>/kernel/sched/core.c  context_switch</h4>
+                    <h4>/kernel/sched/core.c:context_switch</h4>
                     <pre name="code" class="brush:cpp;first-line:2331;collapse: false">
 						/*
 						 * context_switch - switch to the new MM and the new thread's register state.
@@ -352,7 +435,7 @@
                     </pre>
                     <p>
                     </p>
-                    <h4>arch/x86/include/asm/switch_to.h  switch_to</h4>
+                    <h4>arch/x86/include/asm/switch_to.h:switch_to</h4>
                     <pre name="code" class="brush:cpp;first-line:27;collapse: false">
 						/*
 						 * Saving eflags is important. It switches not only IOPL between tasks,
@@ -373,7 +456,7 @@
 						                     "pushl %%ebp\n\t"          /* save    EBP   */     \
 						                     "movl %%esp,%[prev_sp]\n\t"        /* save ESP  将旧进程esp保存到thread_info结构中 */ \
 						                     "movl %[next_sp],%%esp\n\t"        /* restore ESP 用新进程esp填写esp寄存器，此时内核栈已切换  */ \
-						                     "movl $1f,%[prev_ip]\n\t"  /* save EIP 将该进程恢复执行时的下条地址保存到旧进程的thread中*/     \
+						                     "movl $1f,%[prev_ip]\n\t"  /* save EIP将标号1:的地址保存到prev->thread.ip中，下一次该进程被调用的时候从1的位置开始执行*/     \
 						                     "pushl %[next_ip]\n\t"     /* restore EIP 将新进程的ip值压入到新进程的内核栈中 */     \
 						                     __switch_canary                                    \
 						                     "jmp __switch_to\n"        /* regparm call  */     \
@@ -382,18 +465,18 @@
 						                     "popfl\n"                  /* restore flags  恢复flags寄存器*/     \
 						                                                                        \
 						                     /* output parameters */                            \
-						                     : [prev_sp] "=m" (prev->thread.sp),                \
+						                     : [prev_sp] "=m" (prev->thread.sp),/*m表示把变量放入内存，即把[prev_sp]存储的变量放入内存，最后再写入prev->thread.sp*/\
 						                       [prev_ip] "=m" (prev->thread.ip),                \
-						                       "=a" (last),                                     \
+						                       "=a" (last), /*=表示输出,a表示把变量last放入ax,eax = last*/         \
 						                                                                        \
 						                       /* clobbered output registers: */                \
-						                       "=b" (ebx), "=c" (ecx), "=d" (edx),              \
+						                       "=b" (ebx), "=c" (ecx), "=d" (edx),/*b 变量放入ebx,c表示放入ecx，d放入edx,S放入si,D放入edi*/\
 						                       "=S" (esi), "=D" (edi)                           \
 						                                                                        \
 						                       __switch_canary_oparam                           \
 						                                                                        \
 						                       /* input parameters: */                          \
-						                     : [next_sp]  "m" (next->thread.sp),                \
+						                     : [next_sp]  "m" (next->thread.sp), /*next->thread.sp 放入内存中的[next_sp]*/\
 						                       [next_ip]  "m" (next->thread.ip),                \
 						                                                                        \
 						                       /* regparm parameters for __switch_to(): */      \
@@ -408,15 +491,95 @@
                     </pre>
                     <p>
                     </p>
-                    <h4>do_exec</h4>
-                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						
-                    </pre>
-                    <p>
-                    </p>
-                    <h4>do_exec</h4>
-                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						
+                    <h4>arch/x86/kernel/process_32.c:__switch_to</h4>
+                    <pre name="code" class="brush:cpp;first-line:245;collapse: false">
+						__visible __notrace_funcgraph struct task_struct *
+						__switch_to(struct task_struct *prev_p, struct task_struct *next_p)
+						{
+							struct thread_struct *prev = &prev_p->thread,
+										 *next = &next_p->thread;
+							int cpu = smp_processor_id();/* 得到当前代码运行的CPU编号 */
+							struct tss_struct *tss = &per_cpu(init_tss, cpu);/* 得到当前CPU的TSS init_tss为一个per cpu变量*/
+							fpu_switch_t fpu;
+
+							/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
+
+							fpu = switch_fpu_prepare(prev_p, next_p, cpu);/* 加载FPU、MMX、XMM的寄存器组 */
+
+							/*
+							 * Reload esp0.
+							 */
+							load_sp0(tss, next);//重新载入esp0：把next_p->thread.esp0装入对应于本地cpu的tss的esp0字段；
+							//任何由sysenter汇编指令产生的从用户态到内核态的特权级转换将把这个地址拷贝到esp寄存器中 
+
+							/*
+							 * Save away %gs. No need to save %fs, as it was saved on the
+							 * stack on entry.  No need to save %es and %ds, as those are
+							 * always kernel segments while inside the kernel.  Doing this
+							 * before setting the new TLS descriptors avoids the situation
+							 * where we temporarily have non-reloadable segments in %fs
+							 * and %gs.  This could be an issue if the NMI handler ever
+							 * used %fs or %gs (it does not today), or if the kernel is
+							 * running inside of a hypervisor layer.
+							 */
+							lazy_save_gs(prev->gs);
+
+							/*
+							 * Load the per-thread Thread-Local Storage descriptor.
+							 */
+							load_TLS(next, cpu);//装载每个线程的线程局部存储描述符：
+							//把next进程使用的线程局部存储(TLS)段  装入本地CPU的全局描述符表；
+							//三个段选择符保存在进程描述符内的tls_array数组中 
+
+							/*
+							 * Restore IOPL if needed.  In normal use, the flags restore
+							 * in the switch assembly will handle this.  But if the kernel
+							 * is running virtualized at a non-zero CPL, the popf will
+							 * not restore flags, so it must be done in a separate step.
+							 */
+							if (get_kernel_rpl() && unlikely(prev->iopl != next->iopl))
+								set_iopl_mask(next->iopl);
+
+							/*
+							 * If it were not for PREEMPT_ACTIVE we could guarantee that the
+							 * preempt_count of all tasks was equal here and this would not be
+							 * needed.
+							 */
+							task_thread_info(prev_p)->saved_preempt_count = this_cpu_read(__preempt_count);
+							this_cpu_write(__preempt_count, task_thread_info(next_p)->saved_preempt_count);
+
+							/*
+							 * Now maybe handle debug registers and/or IO bitmaps
+							 */
+							if (unlikely(task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV ||
+								     task_thread_info(next_p)->flags & _TIF_WORK_CTXSW_NEXT))
+								__switch_to_xtra(prev_p, next_p, tss);
+
+							/*
+							 * Leave lazy mode, flushing any hypercalls made here.
+							 * This must be done before restoring TLS segments so
+							 * the GDT and LDT are properly updated, and must be
+							 * done before math_state_restore, so the TS bit is up
+							 * to date.
+							 */
+							arch_end_context_switch(next_p);
+
+							this_cpu_write(kernel_stack,
+								  (unsigned long)task_stack_page(next_p) +
+								  THREAD_SIZE - KERNEL_STACK_OFFSET);
+
+							/*
+							 * Restore %gs if needed (which is common)
+							 */
+							if (prev->gs | next->gs)
+								lazy_load_gs(next->gs);
+
+							switch_fpu_finish(next_p, fpu);
+
+							this_cpu_write(current_task, next_p);
+
+							return prev_p;
+						}
                     </pre>
                     <p>
                     </p>
@@ -438,7 +601,9 @@
             <p><a href="http://www.cnblogs.com/paperfish/p/5380361.html">实验作业：进程调度时机跟踪分析进程调度与进程切换的过程</a></p>
             <p><a href="http://liu1227787871.blog.163.com/blog/static/20536319720128262124475/">进程调度函数schedule()分析</a></p>
             <p><a href="http://blog.csdn.net/gatieme/article/details/51872659"> Linux进程上下文切换过程context_switch详解--Linux进程的管理与调度(二十一）</a></p>
-            <p><a href="http://blog.csdn.net/dog250/article/details/5303629">linux程序的命令行参数</a></p>
+            <p><a href="http://www.cnblogs.com/zhaoyl/archive/2012/09/04/2671156.html">Linux进程调度原理</a></p>
+            <p><a href="http://www.cnblogs.com/visayafan/archive/2011/12/10/2283660.html">【内核】进程切换 switch_to 与 __switch_to</a></p>
+            <p><a href="http://www.cnblogs.com/wz19860913/archive/2010/06/02/1748921.html">《深入理解Linux内核3rd》学习笔记——进程切换（下）：switch_to宏、__switch_to函数</a></p>
         </section>
     </content>
     <footer>
