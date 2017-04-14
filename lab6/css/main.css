@@ -66,3 +66,9 @@ img {
 embed {
     margin-left: 12em;
 }
+
+ol {
+    margin-left: 8em;
+    border: 0;
+    padding-left: 2em;
+}
