@@ -261,7 +261,9 @@
 							 * the init task will end up wanting to create kthreads, which, if
 							 * we schedule it before we create kthreadd, will OOPS.
 							 */
-							kernel_thread(kernel_init, NULL, CLONE_FS);//kernel_init是个方法，init进程在此时创建好了，但是现在还不能调度它，会阻塞在wait_for_completion处,等待kthreadd_done Signal,以便往后继续执行下去。
+							kernel_thread(kernel_init, NULL, CLONE_FS);//kernel_thread调用了do_fork
+							//kernel_init是个方法，init进程在此时创建好了，但是现在还不能调度它，会阻塞在wait_for_completion处,
+							//等待kthreadd_done Signal,以便往后继续执行下去。
 							numa_default_policy();//设定NUMA（Non-Uniform Memory Access Architecture）系统的内存访问策略为默认。
 							pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);//创建kthreadd内核线程，它的作用是管理和调度其它内核线程。
 							rcu_read_lock();
@@ -329,7 +331,9 @@
                     <p>在kernel_init中我们重点关注以下代码，在这段代码中实际上是通过run_init_process来执行/sbin/init,通过中断向量0x80（system_call）来从内核发起系统调用，如果/sbin/init调用失败，则会继续调用接下来的文件/etc/init,/bin/init,/bin/sh</p>
                     <p>代码有点多，总结一下。系统允许一个进程创建新进程，新进程即为子进程，子进程还可以创建新的子进程，形成进程树结构模型。整个linux系统的所有进程也是一个树形结构。Linux下有3个特殊的进程，idle进程(PID = 0), init进程(PID = 1)和kthreadd(PID = 2)。</p>
                     <p>在smp系统中，每个处理器单元有独立的一个运行队列，而每个运行队列上又有一个idle进程，即有多少处理器单元，就有多少idle进程。idle进程由系统自动创建, 运行在内核态。idle进程其pid=0，其前身是系统创建的第一个进程，也是唯一一个没有通过fork或者kernel_thread产生的进程。完成加载系统后，演变为进程调度、交换。</p>
-                    <p>init进程由idle通过kernel_thread创建，在内核空间完成初始化后, 加载init程序,是系统中所有其它用户进程的祖先进程Linux中的所有进程都是有init进程创建并运行的。首先Linux内核启动，然后在用户空间中启动init进程，再启动其他系统进程。在系统启动完成完成后，init将变为守护进程监视系统其他进程。</p>
+                    <p>整个linux系统的所有进程是一个树形结构。树根是系统自动构造的，即在内核态下执行的0号进程，它是所有进程的祖先。由0号进程创建1号进程（内核态），1号负责执行内核的部分初始化工作及进行系统配置，并创建若干个用于高速缓存和虚拟主存管理的内核线程。随后，1号进程调用execve()运行可执行程序init，并演变成用户态1号进程，即init进程。
+</p>
+                    <p>init进程由idle通过kernel_thread创建，在内核空间完成初始化后, 加载init程序,是系统中所有其它用户进程的祖先进程。Linux中的所有进程都是有init进程创建并运行的。首先Linux内核启动，然后在用户空间中启动init进程，再启动其他系统进程。在系统启动完成完成后，init将变为守护进程监视系统其他进程。</p>
                     <p>kthreadd进程由idle通过kernel_thread创建，并始终运行在内核空间, 负责所有内核线程的调度和管理，它的任务就是管理和调度其他内核线程kernel_thread, 会循环执行一个kthread的函数，该函数的作用就是运行kthread_create_list全局链表中维护的kthread, 当我们调用kernel_thread创建的内核线程会被加入到此链表中，因此所有的内核线程都是直接或者间接的以kthreadd为父进程。</p>
                 </div>
             </div>
