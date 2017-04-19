@@ -145,6 +145,13 @@
                 <img src="img/34.jpg" alt="">
                 <p>接下来将elf文件映射进内存，修改了eip，esp去执行新进程也就是hello。执行成功的execve是不返回的。下图中，对Exec函数做了一些微小的改变，加了一句输出exec return.这一句不执行，说明了execve不返回。</p>
                 <img src="img/32.jpg" alt="">
+                <p>其实说execve不返回是不准确、不严谨、不细节的。execve作为一个系统调用，需要执行5步：</p>
+                <p>1.发生中断，save cs:eip/esp/eflags</p>
+                <p>2.save_all</p>
+                <p>3.执行do_execve</p>
+                <p>4.restore_all</p>
+                <p>5.iret，pop cs:eip/esp/eflags</p>
+                <p>第3步，do_exec是可以正常返回的。不过在这个系统调用里，更改了eip,esp。所以iret时，执行的时execve要加载的新进程，在本例中是hello。hello进程是不返回的，如果它死掉了，被init清理。</p>
                 <p>
                     <br>
                     <br>
