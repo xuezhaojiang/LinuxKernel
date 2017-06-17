@@ -2,7 +2,7 @@
 
 <head lang="en">
     <meta charset="utf-8">
-    <title>linux core lab8</title>
+    <title>linux kernel lab8</title>
     <!-- <link rel="stylesheet" href="css/normalize.css" type="text/css"> -->
     <link rel="stylesheet" href="css/main.css" type="text/css">
     <link type="text/css" rel="stylesheet" href="css/shCore.css" />
@@ -205,7 +205,7 @@
                 <img src="img/4.jpg" alt="">
                 <p>运行到断点</p>
                 <img src="img/5.jpg" alt="">
-                <p>给tsk赋值之后，查看tsk的内容。task_struct是进程描述符，<a href="https://xuezhaojiang.github.io/LinuxCore/lab6/lab6.html">实验6</a>中有详细介绍。。</p>
+                <p>给tsk赋值之后，查看tsk的内容。task_struct是进程描述符，<a href="https://xuezhaojiang.github.io/LinuxKernel/lab6/lab6.html">实验6</a>中有详细介绍。。</p>
                 <img src="img/6.jpg" alt="">
                 <!-- <p></p>
 <img src="img/7.jpg" alt="">
@@ -480,12 +480,12 @@
                     </pre>
                     <p>首先将栈帧ebp压栈，然后从prev->thread.sp中取出上个进程在上一次切换时的栈顶，放到esp中。此句过后，内核态的堆栈已经切换到了下一个进程的内核堆栈。</p>
                     <p>将标号1的地址放入prev->thread.ip。可见下次prev运行时，将从pop %ebp开始。 然后，将next->thread.ip压栈，并跳转到__switch_to执行。</p>
-                    <p>对比<a href="https://xuezhaojiang.github.io/LinuxCore/lab2/lab2.html">实验2中</a>，将新进程的ip压栈之后，ret，使得next->thread.ip的值进入eip寄存器。</p>
+                    <p>对比<a href="https://xuezhaojiang.github.io/LinuxKernel/lab2/lab2.html">实验2中</a>，将新进程的ip压栈之后，ret，使得next->thread.ip的值进入eip寄存器。</p>
                     <p>可是这次实验中的switch_to中，将新进程的ip值压入到新进程的内核栈中，却没有ret，这个是怎么回事？</p>
                     <p>一个函数编译之后的典型汇编代码如下图：</p>
                     <img src="img/32.jpg" alt="">
                     <p>__switch_to返回时，会从堆栈弹出一项作为返回地址，由于调用__switch_to时不是通过call指令，而是手工压栈加跳转，所以不会返回到标号1处继续执行，而是返回到next->thread.ip处。就是说__switch_to的返回行使了实验2中ret的任务，精彩，实在是精彩；厉害，真心是厉害。如果next进程不是新创建出来的，那么原来也是通过switch_to切换走的，则断点也是标号1，且此时next的内核堆栈上保存有那一次的ebp和flags，以及ebx等。 因此通过这一次函数调用，内核的控制流程也被成功转移到next，在next上次切换的标号1处，对上次保存的ebp和flags等内容进行恢复，这就完成了整个切换过程。</p>
-                    <p>但如果进程B刚刚被创建，之前没有被switch_to出去过，那么[next_ip]里存的将是ret_from_fork（<a href="https://xuezhaojiang.github.io/LinuxCore/lab6/lab6.html">实验6</a>的do_fork中，copy_thread函数有p->thread.ip = (unsigned long) ret_from_fork，然后将它加入调度器 wake_up_new_task(p)）。</p>
+                    <p>但如果进程B刚刚被创建，之前没有被switch_to出去过，那么[next_ip]里存的将是ret_from_fork（<a href="https://xuezhaojiang.github.io/LinuxKernel/lab6/lab6.html">实验6</a>的do_fork中，copy_thread函数有p->thread.ip = (unsigned long) ret_from_fork，然后将它加入调度器 wake_up_new_task(p)）。</p>
                     <p>强烈建议大家看这篇文章，真心厉害。<a href="http://home.ustc.edu.cn/~hchunhui/linux_sched.html">x86体系结构下Linux-2.6.26的进程调度和切换</a></p>
                     <embed src="img/switch_to.mp4" width="852" height="480" autostart="ture"></embed>
                     <p>
