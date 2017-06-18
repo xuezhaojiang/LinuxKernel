@@ -33,7 +33,7 @@
         <section id="abc">
             <h2>基础知识</h2>
             <div id="LinuxSource">
-                <p>链接是将各种代码和数据部分收集起来并组合成为一个单一文件的过程。这个文件可以被加载到存储器并执行。 链接可执行与编译时，也就是在源代码被翻译成机器代码时；也可执行与加载时，也就是程序被加载器加载到存储器并执行时；甚至执行与运行时，由应用程序来执行。在现代系统中，链接是由叫做链接器的程序自动执行的。</p>
+                <p>链接是将各种代码和数据部分收集起来并组合成为一个单一文件的过程。这个文件可以被加载到存储器并执行。 链接可执行于编译时，也就是在源代码被翻译成机器代码时；也可执行于加载时，也就是程序被加载器加载到存储器并执行时；甚至执行于运行时，由应用程序来执行。在现代系统中，链接是由叫做链接器的程序自动执行的。</p>
                 <p>链接器使得分离编译成为可能。可以把应用程序分离成更小，更好管理的模块，分别独立地修改和编译这些模块，并通过链接应用。</p>
                 <h3>编译器驱动程序</h3>
                 <p>大多数编译系统提供编译驱动程序，它代表用户在需要时调用语言预处理器、编译器、汇编器和链接器。编译驱动程序包含这些功能。GCC编译驱动程序：cpp（c预处理器，把main.c翻译成ASCII码的中间文件main.i），ccl（c编译器,翻译成ASCII汇编语言文件main.s），as（汇编器，翻译成可重定位目标文件main.o），ld（链接器，创建可执行文件p）。 unix>./p时，shell调用操作系统中一个叫做加载器的函数，它拷贝可执行程序p中的代码和数据到存储器，然后将控制转移到这个程序的开头。
@@ -206,203 +206,224 @@
                     <!--Ctrl+Shift+{折叠选中代码段-->
                     <h4>do_exec</h4>
                     <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						int do_execve(struct filename *filename,
-						    const char __user *const __user *__argv,
-						    const char __user *const __user *__envp)
-						{
-						    return do_execve_common(filename, argv, envp);
-						}
+                        int do_execve(struct filename *filename,
+                            const char __user *const __user *__argv,
+                            const char __user *const __user *__envp)
+                        {
+                            return do_execve_common(filename, argv, envp);
+                        }
 
 
-						static int do_execve_common(struct filename *filename,
-						                struct user_arg_ptr argv,
-						                struct user_arg_ptr envp)
-						{
-						    // 检查进程的数量限制
+                        static int do_execve_common(struct filename *filename,
+                                        struct user_arg_ptr argv,
+                                        struct user_arg_ptr envp)
+                        {
+                            // 检查进程的数量限制
 
-						    // 选择最小负载的CPU，以执行新程序
-						    sched_exec();
+                            // 选择最小负载的CPU，以执行新程序
+                            sched_exec();
 
-						    // 填充 linux_binprm结构体
-						    retval = prepare_binprm(bprm);
+                            // 填充 linux_binprm结构体
+                            retval = prepare_binprm(bprm);
 
-						    // 拷贝文件名、命令行参数、环境变量
-						    retval = copy_strings_kernel(1, &bprm->filename, bprm);
-						    retval = copy_strings(bprm->envc, envp, bprm);
-						    retval = copy_strings(bprm->argc, argv, bprm);
+                            // 拷贝文件名、命令行参数、环境变量
+                            retval = copy_strings_kernel(1, &bprm->filename, bprm);
+                            retval = copy_strings(bprm->envc, envp, bprm);
+                            retval = copy_strings(bprm->argc, argv, bprm);
 
-						    // 调用exec_binprm,保存当前的pid
-						    retval = exec_binprm(bprm);
+                            // 调用exec_binprm,保存当前的pid
+                            retval = exec_binprm(bprm);
 
-						    // exec执行成功
+                            // exec执行成功
 
-						}
+                        }
 
-						static int exec_binprm(struct linux_binprm *bprm)
-						{
-						    // 扫描formats链表，根据不同的文本格式，选择不同的load函数
-						    ret = search_binary_handler(bprm);
-						    // ...
-						    return ret;
-						}
+                        static int exec_binprm(struct linux_binprm *bprm)
+                        {
+                            // 扫描formats链表，根据不同的文本格式，选择不同的load函数
+                            ret = search_binary_handler(bprm);
+                            // ...
+                            return ret;
+                        }
                     </pre>
                     <p>
                     </p>
-                    <h4>search_binary_handler</h4>
+                    <h4>struct linux_binprm来保存要执行的文件相关信息</h4>
                     <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						int search_binary_handler(struct linux_binprm *bprm)
-						{
-						    // 遍历formats链表，记录着内核目前支持的文件格式
-						    list_for_each_entry(fmt, &formats, lh) {
-						        // 应用每种格式的load_binary方法
-						        retval = fmt->load_binary(bprm);
-						        // ...
-						    }
-						    return retval;
-						}
+                        struct linux_binprm{
+                            char buf[BINPRM_BUF_SIZE]; // 保存可执行文件的头128字节
+                            struct page *page[MAX_ARG_PAGES];
+                            struct mm_struct *mm;
+                            unsigned long p; // 当前内存页最高地址
+                            int sh_bang;
+                            struct file * file; // 要执行的文件
+                            int e_uid, e_gid; // 要执行的进程的有效用户ID和有效组ID
+                            kernel_cap_t cap_inheritable, cap_permitted, cap_effective;
+                            void *security;
+                            int argc, envc; // 命令行参数和环境变量数目
+                            char * filename; // 要执行的文件的名称
+                            char * interp;        // 要执行的文件的真实名称，通常和filename相同
+                            unsigned interp_flags;
+                            unsigned interp_data;
+                            unsigned long loader, exec;
+                        };
                     </pre>
                     <p></p>
-                    <h4>linux_binprm的结构体定义load the binary formats</h4>
+                    <h4>search_binary_handler</h4>
                     <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						struct linux_binfmt {
-						    struct list_head lh;
-						    struct module *module;
-						    int (*load_binary)(struct linux_binprm *);
-						    //load_binary本质上是一个函数指针
-							//retval = fmt->load_binary(bprm)，对应了不同的函数调用。
-						    int (*load_shlib)(struct file *);//加载共享库
-						    int (*core_dump)(struct coredump_params *cprm);
-						    unsigned long min_coredump; /* minimal dump size */
-						};
+                        int search_binary_handler(struct linux_binprm *bprm)
+                        {
+                            // 遍历formats链表，记录着内核目前支持的文件格式
+                            list_for_each_entry(fmt, &formats, lh) {
+                                // 应用每种格式的load_binary方法
+                                retval = fmt->load_binary(bprm);
+                                // ...
+                            }
+                            return retval;
+                        }
+                    </pre>
+                    <p></p>
+                    <h4>linux_binfmt的结构体定义load the binary formats</h4>
+                    <pre name="code" class="brush:cpp;first-line:1;collapse: false">
+                        struct linux_binfmt {
+                            struct list_head lh;
+                            struct module *module;
+                            int (*load_binary)(struct linux_binprm *);
+                            //load_binary本质上是一个函数指针
+                            //retval = fmt->load_binary(bprm)，对应了不同的函数调用。
+                            int (*load_shlib)(struct file *);//加载共享库
+                            int (*core_dump)(struct coredump_params *cprm);
+                            unsigned long min_coredump; /* minimal dump size */
+                        };
                     </pre>
                     <p></p>
                     <h4>在/fs/binfmt_elf.c中elf_format </h4>
                     <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						static struct linux_binfmt elf_format = {
-				            .module     = THIS_MODULE,
-				            .load_binary    = load_elf_binary,//执行的这个函数
-				            .load_shlib = load_elf_library,
-				            .core_dump  = elf_core_dump,
-				            .min_coredump   = ELF_EXEC_PAGESIZE,
-				        };
+                        static struct linux_binfmt elf_format = {
+                            .module     = THIS_MODULE,
+                            .load_binary    = load_elf_binary,//执行的这个函数
+                            .load_shlib = load_elf_library,
+                            .core_dump  = elf_core_dump,
+                            .min_coredump   = ELF_EXEC_PAGESIZE,
+                        };
                     </pre>
                     <p></p>
                     <h4>我们追踪的是elf文件，所以接下来我们查看load_elf_binary</h4>
                     <pre name="code" class="brush:cpp;first-line:1;collapse: false">
-						static int load_elf_binary(struct linux_binprm *bprm)
-						{
-						    // ....
-						    struct pt_regs *regs = current_pt_regs();  // 获取当前进程的寄存器存储位置
+                        static int load_elf_binary(struct linux_binprm *bprm)
+                        {
+                            // ....
+                            struct pt_regs *regs = current_pt_regs();  // 获取当前进程的寄存器存储位置
 
-						    // 获取elf前128个字节
-						    loc->elf_ex = *((struct elfhdr *)bprm->buf);
+                            // 获取elf前128个字节
+                            loc->elf_ex = *((struct elfhdr *)bprm->buf);
 
-						    // 检查魔数是否匹配
-						    if (memcmp(loc->elf_ex.e_ident, ELFMAG, SELFMAG) != 0)
-						        goto out;
+                            // 检查魔数是否匹配
+                            if (memcmp(loc->elf_ex.e_ident, ELFMAG, SELFMAG) != 0)
+                                goto out;
 
-						    // 如果既不是可执行文件也不是动态链接程序，就错误退出
-						    if (loc->elf_ex.e_type != ET_EXEC && loc->elf_ex.e_type != ET_DYN)
-						        // 
-						    // 读取所有的头部信息
-						    // 读入程序的头部分
-						    retval = kernel_read(bprm->file, loc->elf_ex.e_phoff,
-						                 (char *)elf_phdata, size);
+                            // 如果既不是可执行文件也不是动态链接程序，就错误退出
+                            if (loc->elf_ex.e_type != ET_EXEC && loc->elf_ex.e_type != ET_DYN)
+                                // 
+                            // 读取所有的头部信息
+                            // 读入程序的头部分
+                            retval = kernel_read(bprm->file, loc->elf_ex.e_phoff,
+                                         (char *)elf_phdata, size);
 
-						    // 遍历elf的程序头
-						    for (i = 0; i < loc->elf_ex.e_phnum; i++) {
+                            // 遍历elf的程序头
+                            for (i = 0; i < loc->elf_ex.e_phnum; i++) {
 
-						        // 如果存在解释器头部
-						        if (elf_ppnt->p_type == PT_INTERP) {
-						            // 
-						            // 读入解释器名
-						            retval = kernel_read(bprm->file, elf_ppnt->p_offset,
-						                         elf_interpreter,
-						                         elf_ppnt->p_filesz);
+                                // 如果存在解释器头部
+                                if (elf_ppnt->p_type == PT_INTERP) {
+                                    // 
+                                    // 读入解释器名
+                                    retval = kernel_read(bprm->file, elf_ppnt->p_offset,
+                                                 elf_interpreter,
+                                                 elf_ppnt->p_filesz);
 
-						            // 打开解释器文件
-						            interpreter = open_exec(elf_interpreter);
+                                    // 打开解释器文件
+                                    interpreter = open_exec(elf_interpreter);
 
-						            // 读入解释器文件的头部
-						            retval = kernel_read(interpreter, 0, bprm->buf,
-						                         BINPRM_BUF_SIZE);
+                                    // 读入解释器文件的头部
+                                    retval = kernel_read(interpreter, 0, bprm->buf,
+                                                 BINPRM_BUF_SIZE);
 
-						            // 获取解释器的头部
-						            loc->interp_elf_ex = *((struct elfhdr *)bprm->buf);
-						            break;
-						        }
-						        elf_ppnt++;
-						    }
+                                    // 获取解释器的头部
+                                    loc->interp_elf_ex = *((struct elfhdr *)bprm->buf);
+                                    break;
+                                }
+                                elf_ppnt++;
+                            }
 
-						    // 释放空间、删除信号、关闭带有CLOSE_ON_EXEC标志的文件
-						    retval = flush_old_exec(bprm);
-
-
-						    setup_new_exec(bprm);
-
-						    // 为进程分配用户态堆栈，并塞入参数和环境变量
-						    retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
-						                 executable_stack);
-						    current->mm->start_stack = bprm->p;
-
-						    // 将elf文件映射进内存
-						    for(i = 0, elf_ppnt = elf_phdata;
-						        i < loc->elf_ex.e_phnum; i++, elf_ppnt++) {
-
-						        if (unlikely (elf_brk > elf_bss)) {
-						            unsigned long nbyte;
-
-						            // 生成BSS
-						            retval = set_brk(elf_bss + load_bias,
-						                     elf_brk + load_bias);
-						            // ...
-						        }
-
-						        // 可执行程序
-						        if (loc->elf_ex.e_type == ET_EXEC || load_addr_set) {
-						            elf_flags |= MAP_FIXED;
-						        } else if (loc->elf_ex.e_type == ET_DYN) { // 动态链接库
-						            // ...
-						        }
-
-						        // 创建一个新线性区对可执行文件的数据段进行映射
-						        error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
-						                elf_prot, elf_flags, 0);
-
-						        }
-
-						    }
-
-						    // 加上偏移量
-						    loc->elf_ex.e_entry += load_bias;
-						    // ....
+                            // 释放空间、删除信号、关闭带有CLOSE_ON_EXEC标志的文件
+                            retval = flush_old_exec(bprm);
 
 
-						    // 创建一个新的匿名线性区，来映射程序的bss段
-						    retval = set_brk(elf_bss, elf_brk);
+                            setup_new_exec(bprm);
 
-						    // 如果该程序需要动态链接,则elf_interpreter指针不为空,
-						    //并指向对应的 ld文件.内核则加载此文件,由该文件进行动态链接,并最终跳入程序头文件中制定的入口点
-						    if (elf_interpreter) {
-						        unsigned long interp_map_addr = 0;
+                            // 为进程分配用户态堆栈，并塞入参数和环境变量
+                            retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
+                                         executable_stack);
+                            current->mm->start_stack = bprm->p;
 
-						        // 调用一个装入动态链接程序的函数 此时elf_entry指向一个动态链接程序的入口
-						        elf_entry = load_elf_interp(&loc->interp_elf_ex,
-						                        interpreter,
-						                        &interp_map_addr,
-						                        load_bias);
-						        // ...
-						    } else {
-						        // elf_entry是可执行程序的入口
-						        elf_entry = loc->elf_ex.e_entry;
-						        // ....
-						    }
+                            // 将elf文件映射进内存
+                            for(i = 0, elf_ppnt = elf_phdata;
+                                i < loc->elf_ex.e_phnum; i++, elf_ppnt++) {
 
-						    // 修改保存在内核堆栈，但属于用户态的eip和esp
-						    start_thread(regs, elf_entry, bprm->p);
-						    retval = 0;
-						    // 
-						}
+                                if (unlikely (elf_brk > elf_bss)) {
+                                    unsigned long nbyte;
+
+                                    // 生成BSS
+                                    retval = set_brk(elf_bss + load_bias,
+                                             elf_brk + load_bias);
+                                    // ...
+                                }
+
+                                // 可执行程序
+                                if (loc->elf_ex.e_type == ET_EXEC || load_addr_set) {
+                                    elf_flags |= MAP_FIXED;
+                                } else if (loc->elf_ex.e_type == ET_DYN) { // 动态链接库
+                                    // ...
+                                }
+
+                                // 创建一个新线性区对可执行文件的数据段进行映射
+                                error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
+                                        elf_prot, elf_flags, 0);
+
+                                }
+
+                            }
+
+                            // 加上偏移量
+                            loc->elf_ex.e_entry += load_bias;
+                            // ....
+
+
+                            // 创建一个新的匿名线性区，来映射程序的bss段
+                            retval = set_brk(elf_bss, elf_brk);
+
+                            // 如果该程序需要动态链接,则elf_interpreter指针不为空,
+                            //并指向对应的 ld文件.内核则加载此文件,由该文件进行动态链接,并最终跳入程序头文件中制定的入口点
+                            if (elf_interpreter) {
+                                unsigned long interp_map_addr = 0;
+
+                                // 调用一个装入动态链接程序的函数 此时elf_entry指向一个动态链接程序的入口
+                                elf_entry = load_elf_interp(&loc->interp_elf_ex,
+                                                interpreter,
+                                                &interp_map_addr,
+                                                load_bias);
+                                // ...
+                            } else {
+                                // elf_entry是可执行程序的入口
+                                elf_entry = loc->elf_ex.e_entry;
+                                // ....
+                            }
+
+                            // 修改保存在内核堆栈，但属于用户态的eip和esp
+                            start_thread(regs, elf_entry, bprm->p);
+                            retval = 0;
+                            // 
+                        }
                     </pre>
                     <p>可以看到，当这个文件需要用elf_interpreter的话，也就是说它需要依赖动态链接器来解释这个ELF文件，那么它就需要加载load_elf_interp，实际上是加载动态连接器ld，那么这时候Entry point address，也就是说在返回到用户态的时候，它返回的就不是这个可执行程序文件规定的起点，它返回的是动态连接器的程序入口，动态连接器负责解释当前的可执行文件，看它里面依赖哪些动态链接库，然后把那些动态链接库一个一个加载进来，加载进来之后再解释加载进来的动态链接库，看它这个动态链接库还依赖哪些文件，这样就有一个叫广度遍历的方法（即动态链接库的装载过程是一个图的遍历），把所有的动态链接库都装载起来，装载起来之后ld再负责把CPU的控制权移交给可执行程序头部规定的起点位置。</p>
                     <h4>还有些小问题。关于动态链接的。</h4>
