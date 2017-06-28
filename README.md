@@ -30,7 +30,7 @@ http://mooc.study.163.com/course/USTC-1000029000
     
 #### 自己简单补充一些吧，留个基本的概念，也算让整个linux学习完善一些。    
 ### 中断  
-[中断](https://xuezhaojiang.github.io/LinuxKernel/interrupt/interrupt.md)  
+[中断](https://github.com/xuezhaojiang/LinuxKernel/blob/master/interrupt/interrupt.md)  
 ### linux文件系统    
 &emsp;&emsp;文件系统指文件存在的物理空间，linux系统中每个分区都是一个文件系统，都有自己的目录层次结构。linux会将这些分属不同分区的、单独的文件系统按一定的方式形成一个系统的总的目录层次结构。一个操作系统的运行离不开对文件的操作，因此必然要拥有并维护自己的文件系统。    
 &emsp;&emsp;Llinux文件系统使用索引节点来记录文件信息，作用像windows的文件分配表。    
