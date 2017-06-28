@@ -69,8 +69,9 @@ init_rootfs()函数注册特殊文件系统类型rootfs:
 open()系统调用的服务例程为sysopen()。  
 课本上的官方参考是在深入理解linux内核的506页，但那个我没看懂。  
 ```
-1.分配一个全新的struct file结构体，把当前进程的文件表扩展一个文件（即尝试添加一个struct file到当前进程的文件列表中），进程task_struct-> files_struct-> fd_array[NR_OPEN_DEFAULT]是一个struct file数组。  
-2.根据传入的pathname查找或建立对应的dentry
+1.找到一个本进程没有使用的文件描述符fd（int型）。在当前进程打开的文件位图表中，找到第一个为0的位，返回这个位在位图表里的下标。
+2.分配一个全新的struct file结构体，把当前进程的文件表扩展一个文件（即尝试添加一个struct file到当前进程的文件列表中），进程task_struct-> files_struct-> fd_array[NR_OPEN_DEFAULT]是一个struct file数组。  
+3.根据传入的pathname查找或建立对应的dentry
 	1).如果pathname中第一个字符是“/”，那么说明使用绝对路径，设置nameidata为根目录对应的dentry和当前目录的inode，mount点等
 	2).如果不是“/”，则使用相对路径，设置nameidata为当前目录对应的dentry，inode，mount点等
 	这两个信息都可以在当前进程进程描述符的fs字段找到。
@@ -84,5 +85,5 @@ open()系统调用的服务例程为sysopen()。
 		也是如果此dentry不存在则创建它。  
 		如果是创建文件，调用dentry->inode_operation->create来建立inode。  
 		设置1中分配的file的各个字段，struct file结构体加入其自身inode所在超级块的所有文件链表中。
-4.建立当前进程的files的fdtable与file的联系。fdtable是用来管理文件描述符的。  
+4.建立当前进程的files的fdtable与file的联系，current->files->fd[fd]。fdtable是用来管理文件描述符的。  
 ```
