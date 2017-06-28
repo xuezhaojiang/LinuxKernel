@@ -79,7 +79,7 @@ open()系统调用的服务例程为sysopen()。
 		首先查找缓存中是否要查找的dentry。  
 		如果缓存中没有，就要调用上一层目录分量对应的dentry->d_inode这个inode的inode_operation->lookup，返回了新的dentry。  
 		检查这个dentry是否是安装点，是通过dentry的d_mounted字段和dentry的d_inode的i_flags字段来判断的。  
-		如果是调用follow_managed()函数找到最新的vfsmount。  
+		如果是安装点，调用follow_managed()函数找到最新的vfsmount。  
 	4).最后一个文件分量用do_last()函数来处理。  
 		也是如果此dentry不存在则创建它。  
 		如果是创建文件，调用dentry->inode_operation->create来建立inode。  
