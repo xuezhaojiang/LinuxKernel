@@ -79,6 +79,7 @@ common_interrupt:
 irq_desc数组中的元素是irq_desc_t中断描述符，每一个中断号具有一个描述符，使用action链表连接共享同一个中断号的多个设备和中断。handler points to the hw_interrupt_type descriptor that identifies the PIC circuit servicing the IRQ line。handler指向发出这个中断的设备的处理对象hw_irq_controller,比如在单CPU，这个对象一般就是处理芯片8259的对象。为什么要指向这个对象呢？因为当发生中断的时候，内核需要对相应的中断进行一些处理，比如屏蔽这个中断等。这个时候需要对中断设备(比如8259芯片)进行操作，于是可以通过这个指针指向的对象进行操作。  
 irqaction描述符，涉及一个特定的硬件设备和一个特定的中断。handler指向一个I/O设备的中断服务例程(这个handler是irqaction中的),name设备名，dev_id标志设备本身，next指向描述符链表的下一个元素。  
 在激活一个准备利用irq线的设备之前其相应的驱动程序调用request_irq()注册中断处理程序。这个函数建立一个新的irqaction描述符，并用参数值初始化它。然后调用setup_irq()函数把这个描述符插入到适合的IRQ链表。如果setup_irq()返回一个出错码，设备驱动程序中止操作，这意味着IRQ线已有另一个设备所使用，而这个设备不允许中断共享。当设备操作结束时，驱动程序调用free_irq()函数从IRQ链表中删除这个描述符，并释放相应的内存区。  
+比如说时钟中断的注册就是setup_irq(0,&irq0)
 #### do_IRQ()
 unsigned int do_IRQ(struct pt_regs regs)通过pt_regs结构可以找到中断号，然后对接收到的中断进行应答irq_desc[irq].handler->ack(irq)，禁止这条线上的中断传递。接下来，do_IRQ() ensures that a valid handler is registered on the line and that it is enabled and not currently executing.如果是这样的，do_IRQ就调用handle_IRQ_event()来运行为这条中断线所安装的中断处理程序。  
 handle_IRQ_event(),First,because the processor disabled interrupts,they are turned back on unless IRQ_DISABLED was specified during the handler’s registration.Next,each potential handler is executed in a loop.Finally,interrupts are again disable and the function returns.  
