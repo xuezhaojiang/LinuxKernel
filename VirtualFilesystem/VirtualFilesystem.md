@@ -65,6 +65,28 @@ init_rootfs()函数注册特殊文件系统类型rootfs:
 第二阶段：内核在空目录上安装实际根文件系统。  
 ![实际根文件系统](17.jpg)  
 ![实际根文件系统](18.jpg)  
+总结一下：
+```
+第一阶段： 
+1.init_rootfs()注册rootfs;
+init_mount_tree()  
+2.调用do_kern_mount()安装rootfs并把vfsmount的地址保存在mnt局部变量中；
+3.为进程0分配namespace对象（命名空间，进程自己的已安装系统树），并把它插入到mnt中。
+4.将系统每个进程的namespace字段设置为该namespace的地址。并增加其引用计数器。
+5.进程0的根目录和当前工作目录设置为根文件系统。
+第二阶段：
+prepare_namespace函数
+1.把root_device_name变量设置为从启动参数root中获得的设备文件名。同样把ROOT_DEV变量设置为同一设备文件的设备号。
+2.调用mount_root()函数。
+	a.调用sys_mknod在rootfs初始根文件系统中创建设备文件/dev/root
+	b.创建filesystem type names链表
+	c.扫描filesystem type names链表，对每个name，调用sys_mount()试图在根设备上安装给定的filesystem type。调用成功的文件系统被安装在rootfs的/root目录下。
+	d.调用sys_chdir("/root")改变进程的当前目录。
+3.移动rootfs文件系统根目录上的已安装文件系统的安装点。
+	sys_mount(".","/",NULL,MS_MOVE,NULL);
+	sys_chroot(".")
+```
+
 ### open()系统调用  
 open()系统调用的服务例程为sysopen()。  
 课本上的官方参考是在深入理解linux内核的506页，但那个我没看懂。  
