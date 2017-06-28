@@ -31,8 +31,9 @@
             <h2>基础知识</h2>
             <div id="LinuxSource">
                 <h3>系统调用在内核代码中的处理过程</h3>
-                <p>1.main.c中start_kernel函数：trap_init()函数中有一句 set_system_trap_gate(SYSCALL_VECTOR,&system_call)。其中：SYSCALL_VECTOR：系统调用的中断向量（#define SYSCALL_VECTOR 0x80），&system_call：汇编代码入口 </p>
-                <p>2.一执行int 0x80，系统直接跳转到system_call。 </p>
+                <p>1.main.c中start_kernel函数：trap_init()函数中有一句 set_system_trap_gate(SYSCALL_VECTOR,&system_call)。
+                    <br>其中：SYSCALL_VECTOR：系统调用的中断向量（#define SYSCALL_VECTOR 0x80），&system_call：汇编代码入口 </p>
+                <p>2.一执行int $0x80，系统直接跳转到system_call。 </p>
                 <p>3.SAVE_ALL：保存现场 </p>
                 <p>4.call *sys_call_table(,%eax,4)调用了系统调度处理函数，eax存的是系统调用号，是实际的系统调度程序。 sys_call_table：系统调用分派表 </p>
                 <p>5.syscall_after_all：保存返回值 </p>
