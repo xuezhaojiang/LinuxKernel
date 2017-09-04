@@ -11,9 +11,10 @@ kobject是面向对象的思想在Linux kernel中的体现。好好体会其中�
 将接口类组合进对象，运行时动态改变行为。  
 设计模式原则：封装变化、多用组合少用继承、针对接口编程。    
 #### ktype  
+release(),sysfs_ops  
 #### device  
 核心字段：kobj,device_driver,power,release().  
-可以看出是和电源管理相关的。  
+可以看出是和电源管理相关的。之所以电源管理是为了节能。  
 #### device_driver  
 核心字段：name,kobj,devices,probe(),remove(),shutdown(),suspend(),resume().  
 和电源、热拔插相关。  
